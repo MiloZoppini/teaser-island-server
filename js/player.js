@@ -15,14 +15,16 @@ class Player {
         this.isPOV = true; // Sempre in prima persona
         this.initialPosition = position;
         this.loaded = false;
+        this.playerColor = this.isLocalPlayer ? 0x00ff00 : this.getRandomPlayerColor(); // Verde per il giocatore locale, colore casuale per gli altri
+        this.playerName = this.isLocalPlayer ? "Tu" : "Giocatore " + Math.floor(Math.random() * 1000);
         
         // Crea un gruppo temporaneo fino al caricamento del modello
         this.model = new THREE.Group();
         this.scene.add(this.model);
         this.setPosition(position);
 
-        // Carica il modello GLTF
-        this.loadModel();
+        // Carica il modello del personaggio
+        this.createPlayerAvatar();
 
         if (isLocalPlayer) {
             this.setupControls();
@@ -30,95 +32,48 @@ class Player {
             
             // Crea un elemento per mostrare lo stato della corsa
             this.createRunningIndicator();
+        } else {
+            // Aggiungi un'etichetta con il nome del giocatore per i giocatori remoti
+            this.addPlayerNameTag();
         }
     }
 
-    loadModel() {
-        // Creiamo un loader GLTF
-        const loader = new THREE.GLTFLoader();
-        
-        // Utilizziamo un modello semplice per il giocatore
-        // Poiché non abbiamo un modello di personaggio specifico, useremo un oggetto semplice
-        // come una barca per rappresentare il giocatore
-        const modelUrl = this.isLocalPlayer ? 
-            '/models/boat-row-small.glb' : 
-            '/models/boat-row-large.glb';
-        
-        // Carica il modello
-        loader.load(
-            modelUrl,
-            (gltf) => {
-                // Rimuovi il gruppo temporaneo
-                this.scene.remove(this.model);
-                
-                // Assegna il modello caricato
-                this.model = gltf.scene;
-                
-                // Scala il modello
-                this.model.scale.set(0.8, 0.8, 0.8);
-                
-                // Applica materiali con colori neon
-                this.model.traverse((child) => {
-                    if (child.isMesh) {
-                        // Salva il materiale originale
-                        child.originalMaterial = child.material;
-                        
-                        // Crea un nuovo materiale con colori neon
-                        child.material = new THREE.MeshStandardMaterial({
-                            color: this.isLocalPlayer ? 0x00ff00 : 0xff0000, // Verde per il giocatore locale, rosso per gli altri
-                            roughness: 0.3,
-                            metalness: 0.5,
-                            emissive: this.isLocalPlayer ? 0x00ff00 : 0xff0000,
-                            emissiveIntensity: 0.2
-                        });
-                        
-                        // Abilita ombre
-                        child.castShadow = true;
-                        child.receiveShadow = true;
-                    }
-                });
-                
-                // Aggiungi il modello alla scena
-                this.scene.add(this.model);
-                
-                // Imposta la posizione
-                this.setPosition(this.initialPosition);
-                
-                this.loaded = true;
-            },
-            (xhr) => {
-                console.log((xhr.loaded / xhr.total * 100) + '% caricato');
-            },
-            (error) => {
-                console.error('Errore nel caricamento del modello:', error);
-                
-                // In caso di errore, crea un modello di fallback
-                this.createFallbackModel();
-            }
-        );
+    getRandomPlayerColor() {
+        // Colori vivaci per i giocatori remoti
+        const colors = [
+            0xff0000, // Rosso
+            0x0000ff, // Blu
+            0xff00ff, // Magenta
+            0xffff00, // Giallo
+            0x00ffff, // Ciano
+            0xff8000, // Arancione
+            0x8000ff  // Viola
+        ];
+        return colors[Math.floor(Math.random() * colors.length)];
     }
 
-    createFallbackModel() {
-        // Crea un modello di fallback in caso di errore nel caricamento
-        console.log('Creazione modello di fallback per il giocatore');
+    createPlayerAvatar() {
+        // Crea un avatar più visibile per il giocatore
+        console.log('Creazione avatar per il giocatore');
         
         // Gruppo principale del personaggio
         this.model = new THREE.Group();
 
-        // Corpo (cubo)
-        const bodyGeometry = new THREE.BoxGeometry(1, 1.5, 1);
+        // Corpo (cilindro)
+        const bodyGeometry = new THREE.CylinderGeometry(0.5, 0.5, 1.8, 16);
         const bodyMaterial = new THREE.MeshStandardMaterial({ 
-            color: this.isLocalPlayer ? 0x00ff00 : 0xff0000,
+            color: this.playerColor,
             roughness: 0.3,
             metalness: 0.5,
-            emissive: this.isLocalPlayer ? 0x00ff00 : 0xff0000,
-            emissiveIntensity: 0.2
+            emissive: this.playerColor,
+            emissiveIntensity: 0.3
         });
         this.body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+        this.body.position.y = 0.9; // Posiziona il corpo a metà altezza
         this.model.add(this.body);
 
-        // Testa (cono)
-        const headGeometry = new THREE.ConeGeometry(0.4, 0.8, 8);
+        // Testa (sfera)
+        const headGeometry = new THREE.SphereGeometry(0.5, 16, 16);
         const headMaterial = new THREE.MeshStandardMaterial({ 
             color: 0xffcc00,
             roughness: 0.3,
@@ -127,28 +82,53 @@ class Player {
             emissiveIntensity: 0.2
         });
         this.head = new THREE.Mesh(headGeometry, headMaterial);
-        this.head.position.y = 1.15;
+        this.head.position.y = 2.1; // Posiziona la testa sopra il corpo
         this.model.add(this.head);
 
         // Braccia (cilindri)
-        const armGeometry = new THREE.CylinderGeometry(0.2, 0.2, 1);
+        const armGeometry = new THREE.CylinderGeometry(0.15, 0.15, 1.2, 8);
         const armMaterial = new THREE.MeshStandardMaterial({ 
-            color: bodyMaterial.color,
+            color: this.playerColor,
             roughness: 0.3,
             metalness: 0.5,
-            emissive: bodyMaterial.color,
+            emissive: this.playerColor,
             emissiveIntensity: 0.2
         });
         
+        // Braccio sinistro
         this.leftArm = new THREE.Mesh(armGeometry, armMaterial);
-        this.leftArm.position.set(-0.7, 0, 0);
-        this.leftArm.rotation.z = Math.PI / 2;
+        this.leftArm.position.set(-0.8, 1.2, 0);
+        this.leftArm.rotation.z = Math.PI / 6; // Inclina leggermente il braccio
         this.model.add(this.leftArm);
 
+        // Braccio destro
         this.rightArm = new THREE.Mesh(armGeometry, armMaterial);
-        this.rightArm.position.set(0.7, 0, 0);
-        this.rightArm.rotation.z = -Math.PI / 2;
+        this.rightArm.position.set(0.8, 1.2, 0);
+        this.rightArm.rotation.z = -Math.PI / 6; // Inclina leggermente il braccio
         this.model.add(this.rightArm);
+
+        // Gambe (cilindri)
+        const legGeometry = new THREE.CylinderGeometry(0.2, 0.2, 1.2, 8);
+        const legMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x0000ff, // Blu per le gambe
+            roughness: 0.3,
+            metalness: 0.5,
+            emissive: 0x0000ff,
+            emissiveIntensity: 0.1
+        });
+        
+        // Gamba sinistra
+        this.leftLeg = new THREE.Mesh(legGeometry, legMaterial);
+        this.leftLeg.position.set(-0.3, 0, 0);
+        this.model.add(this.leftLeg);
+
+        // Gamba destra
+        this.rightLeg = new THREE.Mesh(legGeometry, legMaterial);
+        this.rightLeg.position.set(0.3, 0, 0);
+        this.model.add(this.rightLeg);
+
+        // Aggiungi un effetto di luce attorno al giocatore
+        this.addPlayerLight();
 
         // Aggiungi il modello alla scena
         this.scene.add(this.model);
@@ -157,6 +137,76 @@ class Player {
         this.setPosition(this.initialPosition);
         
         this.loaded = true;
+    }
+
+    addPlayerLight() {
+        // Aggiungi una luce puntuale attorno al giocatore per renderlo più visibile
+        this.playerLight = new THREE.PointLight(this.playerColor, 1, 5);
+        this.playerLight.position.set(0, 1.5, 0);
+        this.model.add(this.playerLight);
+        
+        // Aggiungi un effetto di particelle luminose attorno al giocatore
+        if (!this.isLocalPlayer) {
+            this.addPlayerParticles();
+        }
+    }
+
+    addPlayerParticles() {
+        // Crea un sistema di particelle attorno al giocatore
+        const particleCount = 20;
+        const particleGeometry = new THREE.BufferGeometry();
+        const particlePositions = new Float32Array(particleCount * 3);
+        
+        for (let i = 0; i < particleCount; i++) {
+            const i3 = i * 3;
+            particlePositions[i3] = (Math.random() - 0.5) * 2;
+            particlePositions[i3 + 1] = Math.random() * 3;
+            particlePositions[i3 + 2] = (Math.random() - 0.5) * 2;
+        }
+        
+        particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+        
+        const particleMaterial = new THREE.PointsMaterial({
+            color: this.playerColor,
+            size: 0.1,
+            transparent: true,
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending
+        });
+        
+        this.particles = new THREE.Points(particleGeometry, particleMaterial);
+        this.model.add(this.particles);
+    }
+
+    addPlayerNameTag() {
+        // Crea un canvas per il testo
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = 256;
+        canvas.height = 64;
+        
+        // Imposta lo stile del testo
+        context.font = 'Bold 24px Arial';
+        context.fillStyle = '#' + this.playerColor.toString(16).padStart(6, '0');
+        context.textAlign = 'center';
+        context.fillText(this.playerName, 128, 32);
+        
+        // Crea una texture dal canvas
+        const texture = new THREE.CanvasTexture(canvas);
+        
+        // Crea un materiale con la texture
+        const material = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true
+        });
+        
+        // Crea uno sprite con il materiale
+        this.nameTag = new THREE.Sprite(material);
+        this.nameTag.scale.set(2, 0.5, 1);
+        this.nameTag.position.y = 3; // Posiziona il tag sopra la testa
+        
+        // Aggiungi il tag al modello
+        this.model.add(this.nameTag);
     }
 
     setupCamera() {
@@ -263,6 +313,7 @@ class Player {
         
         if (this.isLocalPlayer) {
             this.updateMovement();
+            this.updatePhysics();
             this.updateCamera();
             
             // Verifica collisione con il tesoro
@@ -303,8 +354,15 @@ class Player {
                     }
                 }
             }
+
+            // Invia la posizione e la rotazione al server
+            if (window.game && window.game.gameSocket) {
+                window.game.gameSocket.emitPlayerMove(this.getPosition(), this.getRotation());
+            }
+        } else {
+            // Animazione per i giocatori remoti
+            this.animateRemotePlayer();
         }
-        this.updatePhysics();
     }
 
     updateMovement() {
@@ -436,8 +494,56 @@ class Player {
         document.body.appendChild(this.runningIndicator);
     }
 
+    animateRemotePlayer() {
+        // Animazione semplice per i giocatori remoti
+        if (this.leftArm && this.rightArm) {
+            const time = Date.now() * 0.001;
+            
+            // Muovi le braccia avanti e indietro
+            this.leftArm.rotation.x = Math.sin(time * 2) * 0.2;
+            this.rightArm.rotation.x = Math.sin(time * 2 + Math.PI) * 0.2;
+            
+            // Muovi le gambe avanti e indietro
+            if (this.leftLeg && this.rightLeg) {
+                this.leftLeg.rotation.x = Math.sin(time * 2) * 0.2;
+                this.rightLeg.rotation.x = Math.sin(time * 2 + Math.PI) * 0.2;
+            }
+            
+            // Fai ruotare le particelle
+            if (this.particles) {
+                this.particles.rotation.y = time;
+            }
+        }
+    }
+
     dispose() {
-        this.scene.remove(this.model);
+        if (this.model) {
+            this.scene.remove(this.model);
+            
+            // Rimuovi tutti i materiali e le geometrie
+            this.model.traverse((child) => {
+                if (child.isMesh) {
+                    child.geometry.dispose();
+                    if (child.material.map) child.material.map.dispose();
+                    child.material.dispose();
+                }
+            });
+        }
+        
+        if (this.nameTag && this.nameTag.material) {
+            if (this.nameTag.material.map) this.nameTag.material.map.dispose();
+            this.nameTag.material.dispose();
+        }
+        
+        if (this.playerLight) {
+            this.model.remove(this.playerLight);
+        }
+        
+        if (this.particles) {
+            this.model.remove(this.particles);
+            this.particles.geometry.dispose();
+            this.particles.material.dispose();
+        }
         
         // Rimuovi l'indicatore di corsa
         if (this.runningIndicator && this.runningIndicator.parentNode) {
