@@ -31,6 +31,13 @@ class Player {
         this.createMinecraftAvatar();
 
         if (isLocalPlayer) {
+            // Rendi invisibili le parti del modello del giocatore locale
+            this.model.traverse(child => {
+                if (child.isMesh) {
+                    child.visible = false;
+                }
+            });
+            
             this.setupControls();
             this.setupCamera();
             
@@ -340,20 +347,19 @@ class Player {
     }
 
     setupCamera() {
-        // Crea una camera in prima persona
+        // Crea una camera in terza persona
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         
-        // Posiziona la camera all'altezza degli occhi del giocatore
-        this.camera.position.set(0, 2.7, 0);
+        // Posiziona la camera dietro e sopra il giocatore
+        this.cameraOffset = new THREE.Vector3(0, 5, 10);
+        this.updateCameraPosition();
         
-        // Aggiungi la camera al modello del giocatore
-        this.model.add(this.camera);
+        // Non aggiungere la camera al modello del giocatore
+        // Invece, la aggiungiamo direttamente alla scena
+        this.scene.add(this.camera);
         
-        // Imposta la camera per guardare in avanti
-        this.camera.lookAt(0, 2.7, -1);
-        
-        // Inizializza la rotazione verticale a zero
-        this.verticalAngle = 0;
+        // Imposta la camera per guardare verso il giocatore
+        this.camera.lookAt(this.model.position);
         
         // Salva la camera in window.game per debug
         if (window.game) {
@@ -362,7 +368,7 @@ class Player {
         
         console.log('Camera setup completato per il giocatore locale');
         
-        // Blocchiamo il puntatore per una migliore esperienza in prima persona
+        // Blocchiamo il puntatore per una migliore esperienza
         document.addEventListener('click', () => {
             if (document.pointerLockElement !== document.body) {
                 document.body.requestPointerLock();
@@ -374,6 +380,86 @@ class Player {
             this.camera.aspect = window.innerWidth / window.innerHeight;
             this.camera.updateProjectionMatrix();
         });
+        
+        // Aggiungiamo un pulsante per passare dalla vista in prima persona a quella in terza persona
+        this.createViewSwitchButton();
+    }
+
+    createViewSwitchButton() {
+        // Crea un pulsante per cambiare la vista
+        this.viewSwitchButton = document.createElement('button');
+        this.viewSwitchButton.className = 'view-switch-button';
+        this.viewSwitchButton.textContent = 'Cambia Vista (V)';
+        document.body.appendChild(this.viewSwitchButton);
+        
+        // Aggiungi l'evento click
+        this.viewSwitchButton.addEventListener('click', () => {
+            this.toggleView();
+        });
+        
+        // Aggiungi anche il tasto V per cambiare vista
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'KeyV') {
+                this.toggleView();
+            }
+        });
+    }
+    
+    toggleView() {
+        this.isPOV = !this.isPOV;
+        console.log(`Vista cambiata in: ${this.isPOV ? 'Prima Persona' : 'Terza Persona'}`);
+        
+        // Aggiorna la posizione della camera
+        this.updateCameraPosition();
+        
+        // Aggiorna la visibilità del modello
+        this.model.traverse(child => {
+            if (child.isMesh) {
+                // In prima persona, il modello è invisibile
+                // In terza persona, il modello è visibile
+                child.visible = !this.isPOV;
+            }
+        });
+    }
+    
+    updateCameraPosition() {
+        if (!this.camera) return;
+        
+        if (this.isPOV) {
+            // Vista in prima persona
+            // Posiziona la camera all'altezza degli occhi del giocatore
+            this.camera.position.set(
+                this.model.position.x,
+                this.model.position.y + 2.7,
+                this.model.position.z
+            );
+        } else {
+            // Vista in terza persona
+            // Calcola la posizione della camera dietro il giocatore
+            const angle = this.model.rotation.y;
+            const distance = 10;
+            const height = 5;
+            
+            this.camera.position.set(
+                this.model.position.x + Math.sin(angle) * distance,
+                this.model.position.y + height,
+                this.model.position.z + Math.cos(angle) * distance
+            );
+        }
+        
+        // Imposta la camera per guardare verso il giocatore o nella direzione del giocatore
+        if (this.isPOV) {
+            // In prima persona, guarda nella direzione del giocatore
+            const lookAtPoint = new THREE.Vector3(
+                this.model.position.x - Math.sin(this.model.rotation.y),
+                this.model.position.y + 2.7,
+                this.model.position.z - Math.cos(this.model.rotation.y)
+            );
+            this.camera.lookAt(lookAtPoint);
+        } else {
+            // In terza persona, guarda verso il giocatore
+            this.camera.lookAt(this.model.position);
+        }
     }
 
     setupControls() {
@@ -460,8 +546,8 @@ class Player {
         const maxVerticalAngle = Math.PI / 3; // 60 gradi
         this.verticalAngle = Math.max(-maxVerticalAngle, Math.min(maxVerticalAngle, this.verticalAngle));
         
-        // Applica la rotazione verticale alla camera
-        this.camera.rotation.x = this.verticalAngle;
+        // Aggiorna la posizione della camera
+        this.updateCameraPosition();
     }
 
     jump() {
@@ -640,40 +726,48 @@ class Player {
     updateCamera() {
         if (!this.isLocalPlayer || !this.camera) return;
         
+        // Aggiorna la posizione della camera in base alla vista corrente
+        this.updateCameraPosition();
+        
         // Calcola l'intensità del movimento basata sulla velocità
         const speed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
         const isMoving = speed > 0.01;
         
-        // Effetto di oscillazione durante la camminata
-        if (isMoving) {
+        // Effetto di oscillazione durante la camminata (solo in prima persona)
+        if (this.isPOV && isMoving) {
             const time = Date.now() * 0.001;
             const bobFrequency = this.isRunning ? 10 : 6; // Frequenza più alta durante la corsa
             const bobAmplitude = this.isRunning ? 0.04 : 0.02; // Ampiezza maggiore durante la corsa
             
             // Oscillazione verticale (su e giù) - più sottile
             const verticalBob = Math.sin(time * bobFrequency) * bobAmplitude;
-            this.camera.position.y = 2.7 + verticalBob;
+            this.camera.position.y += verticalBob;
             
             // Leggera oscillazione laterale (destra e sinistra) - più sottile
             const lateralBob = Math.cos(time * bobFrequency * 0.5) * bobAmplitude * 0.3;
-            this.camera.position.x = lateralBob;
+            this.camera.position.x += lateralBob;
             
             // Leggera inclinazione della testa - più sottile
             const tiltAngle = Math.sin(time * bobFrequency * 0.5) * 0.005;
             this.camera.rotation.z = tiltAngle;
-        } else {
-            // Ripristina la posizione della camera quando il giocatore è fermo
-            this.camera.position.y = 2.7;
-            this.camera.position.x = 0;
+        } else if (!this.isPOV) {
+            // In terza persona, nessuna oscillazione
             this.camera.rotation.z = 0;
         }
         
         // Mantieni la rotazione verticale impostata dal movimento del mouse
-        this.camera.rotation.x = this.verticalAngle;
+        if (this.isPOV) {
+            this.camera.rotation.x = this.verticalAngle;
+        }
     }
 
     setPosition(position) {
         this.model.position.copy(position);
+        
+        // Aggiorna la posizione della camera se è un giocatore locale
+        if (this.isLocalPlayer && this.camera) {
+            this.updateCameraPosition();
+        }
     }
 
     setRotation(rotation) {
