@@ -622,9 +622,6 @@ class Player {
         // Calcola la velocità di movimento in base allo stato di corsa
         const moveSpeed = this.isRunning ? this.runSpeed : this.moveSpeed;
         
-        // Direzione di movimento basata sulla rotazione del modello
-        const angle = this.model.rotation.y;
-        
         // Resetta la velocità orizzontale
         let moveX = 0;
         let moveZ = 0;
@@ -655,13 +652,13 @@ class Player {
             moveZ /= length;
         }
         
-        // Applica la rotazione del giocatore al vettore di movimento
-        const rotatedMoveX = moveX * Math.cos(angle) - moveZ * Math.sin(angle);
-        const rotatedMoveZ = moveX * Math.sin(angle) + moveZ * Math.cos(angle);
+        // In Minecraft, il movimento è sempre relativo alla direzione della camera
+        // Usiamo solo la rotazione orizzontale (yaw) per il movimento
+        const yaw = this.model.rotation.y;
         
-        // Applica la velocità di movimento
-        this.velocity.x = rotatedMoveX * moveSpeed;
-        this.velocity.z = rotatedMoveZ * moveSpeed;
+        // Applica la rotazione orizzontale al vettore di movimento
+        this.velocity.x = (moveZ * Math.sin(yaw) + moveX * Math.sin(yaw + Math.PI/2)) * moveSpeed;
+        this.velocity.z = (moveZ * Math.cos(yaw) + moveX * Math.cos(yaw + Math.PI/2)) * moveSpeed;
         
         // Applica un fattore di rallentamento quando si va all'indietro
         if (this.keys.backward && !this.keys.forward) {
