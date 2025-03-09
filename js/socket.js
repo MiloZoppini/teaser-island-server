@@ -31,10 +31,18 @@ class GameSocket {
         
         // Usa l'URL di produzione su Render.com o localhost per lo sviluppo locale
         const serverUrl = window.location.hostname === 'localhost' 
-            ? 'http://localhost:3000' 
+            ? 'http://localhost:10000' // Usa la porta 10000 anche in locale
             : window.location.origin;
             
-        this.socket = io(serverUrl);
+        this.socket = io(serverUrl, {
+            reconnection: true,
+            reconnectionAttempts: 10,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            timeout: 20000,
+            autoConnect: true,
+            transports: ['websocket', 'polling']
+        });
         
         // Gestione degli eventi di connessione
         this.socket.on('connect', () => {
@@ -52,12 +60,30 @@ class GameSocket {
             console.error('Connection error:', error);
             this.connected = false;
             this.stopPing();
+            
+            // Tenta di riconnettersi dopo un breve ritardo
+            setTimeout(() => {
+                if (!this.connected) {
+                    console.log('Attempting to reconnect...');
+                    this.socket.connect();
+                }
+            }, 3000);
         });
         
         this.socket.on('disconnect', (reason) => {
             console.log('Disconnected from server:', reason);
             this.connected = false;
             this.stopPing();
+            
+            // Tenta di riconnettersi se la disconnessione non è volontaria
+            if (reason !== 'io client disconnect') {
+                setTimeout(() => {
+                    if (!this.connected) {
+                        console.log('Attempting to reconnect after disconnect...');
+                        this.socket.connect();
+                    }
+                }, 3000);
+            }
         });
         
         this.setupListeners();
@@ -238,13 +264,13 @@ class GameSocket {
         // Ferma eventuali ping precedenti
         this.stopPing();
         
-        // Invia un ping ogni 30 secondi
+        // Invia un ping ogni 15 secondi (più frequente di prima)
         this.pingInterval = setInterval(() => {
             if (this.connected) {
                 console.log('Sending ping to server');
                 this.socket.emit('ping');
             }
-        }, 30000); // 30 secondi
+        }, 15000); // 15 secondi
     }
     
     /**

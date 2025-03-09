@@ -6,9 +6,11 @@ const io = require('socket.io')(http, {
         origin: "*", // Consenti connessioni da qualsiasi origine
         methods: ["GET", "POST"]
     },
-    pingTimeout: 60000, // Aumenta il timeout del ping a 60 secondi
-    pingInterval: 25000, // Riduce l'intervallo di ping a 25 secondi
-    transports: ['websocket', 'polling'] // Supporta sia WebSocket che polling
+    pingTimeout: 120000, // Aumenta ulteriormente il timeout del ping a 120 secondi
+    pingInterval: 20000, // Riduce ulteriormente l'intervallo di ping a 20 secondi
+    transports: ['websocket', 'polling'], // Supporta sia WebSocket che polling
+    allowEIO3: true, // Supporta anche la versione 3 del protocollo Engine.IO
+    maxHttpBufferSize: 1e8 // Aumenta la dimensione massima del buffer a 100 MB
 });
 const path = require('path');
 
@@ -490,7 +492,7 @@ function getRandomTreasureType() {
 }
 
 // Start server
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000; // Usa la porta 10000 come predefinita per Render.com
 
 // Imposta il timeout del server a 120 secondi
 http.setTimeout(120000);
@@ -498,6 +500,7 @@ http.setTimeout(120000);
 // Gestione degli errori del server
 const server = http.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
+    console.log(`Server URL: ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`}`);
     // Initialize treasure position
     gameState.treasure.position = getRandomPosition();
     
