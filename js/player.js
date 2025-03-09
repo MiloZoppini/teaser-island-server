@@ -1,5 +1,5 @@
 class Player {
-    constructor(scene, position = { x: 0, y: 0, z: 0 }, isLocalPlayer = false) {
+    constructor(scene, position = { x: 0, y: 0, z: 0 }, isLocalPlayer = false, nickname = null) {
         this.scene = scene;
         this.isLocalPlayer = isLocalPlayer;
         this.moveSpeed = 0.08; // Ridotta da 0.15 a 0.08 per una camminata più lenta
@@ -16,7 +16,9 @@ class Player {
         this.initialPosition = position;
         this.loaded = false;
         this.playerColor = this.isLocalPlayer ? 0x00ff00 : this.getRandomPlayerColor(); // Verde per il giocatore locale, colore casuale per gli altri
-        this.playerName = this.isLocalPlayer ? "Tu" : this.getMinecraftName();
+        
+        // Usa il nickname fornito o genera un nome casuale
+        this.playerName = nickname || (this.isLocalPlayer ? "Tu" : this.getMinecraftName());
         
         console.log(`Creazione giocatore ${this.playerName} in posizione:`, position, `isLocalPlayer: ${isLocalPlayer}`);
         
@@ -341,14 +343,14 @@ class Player {
         // Crea una camera in prima persona
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         
-        // Posiziona la camera sopra la testa del giocatore
-        this.camera.position.set(0, 3, 0);
+        // Posiziona la camera all'altezza degli occhi del giocatore
+        this.camera.position.set(0, 2.7, 0);
         
         // Aggiungi la camera al modello del giocatore
         this.model.add(this.camera);
         
-        // Imposta la camera per guardare in avanti
-        this.camera.lookAt(0, 3, -10);
+        // Imposta la camera per guardare in avanti con una leggera inclinazione verso il basso
+        this.camera.lookAt(0, 2.5, -10);
         
         // Salva la camera in window.game per debug
         if (window.game) {
@@ -362,6 +364,12 @@ class Player {
             if (document.pointerLockElement !== document.body) {
                 document.body.requestPointerLock();
             }
+        });
+        
+        // Aggiungiamo un listener per l'evento di resize della finestra
+        window.addEventListener('resize', () => {
+            this.camera.aspect = window.innerWidth / window.innerHeight;
+            this.camera.updateProjectionMatrix();
         });
     }
 
@@ -434,20 +442,22 @@ class Player {
     }
 
     onMouseMove(event) {
-        if (this.isLocalPlayer && document.pointerLockElement === document.body) {
-            // Rotazione orizzontale
-            this.model.rotation.y -= event.movementX * 0.002;
-            
-            // Rotazione verticale (guardare su/giù)
-            this.verticalAngle = this.verticalAngle || 0;
-            this.verticalAngle -= event.movementY * 0.002;
-            this.verticalAngle = Math.max(-Math.PI/3, Math.min(Math.PI/3, this.verticalAngle));
-            
-            // Applica la rotazione verticale alla camera
-            if (this.camera) {
-                this.camera.rotation.x = this.verticalAngle;
-            }
-        }
+        if (!this.isLocalPlayer || document.pointerLockElement !== document.body) return;
+        
+        // Sensibilità del mouse (più basso = più sensibile)
+        const sensitivity = 0.002;
+        
+        // Calcola la rotazione in base al movimento del mouse
+        this.model.rotation.y -= event.movementX * sensitivity;
+        
+        // Limita la rotazione verticale per evitare che la camera si capovolga
+        const maxVerticalAngle = Math.PI / 2 - 0.1; // Quasi 90 gradi, ma non del tutto
+        
+        // Aggiorna la rotazione verticale della camera
+        this.camera.rotation.x += event.movementY * sensitivity;
+        
+        // Limita la rotazione verticale
+        this.camera.rotation.x = Math.max(-maxVerticalAngle, Math.min(maxVerticalAngle, this.camera.rotation.x));
     }
 
     jump() {
@@ -460,13 +470,16 @@ class Player {
     update() {
         if (!this.loaded) return;
         
+        // Aggiorna la fisica e il movimento
+        this.updatePhysics();
+        this.updateMovement();
+        
+        // Aggiorna la camera per il giocatore locale
         if (this.isLocalPlayer) {
-            this.updateMovement();
-            this.updatePhysics();
             this.updateCamera();
             
             // Verifica collisione con il tesoro
-            if (window.game && window.game.treasure) {
+            if (window.game && window.game.treasures && window.game.treasures.length > 0) {
                 const playerPosition = this.getPosition();
                 
                 // Aggiungiamo un controllo per evitare collisioni multiple in rapida successione
@@ -474,46 +487,66 @@ class Player {
                 const lastCollision = this.lastTreasureCollision || 0;
                 
                 if (now - lastCollision > 1000) { // Aspetta almeno 1 secondo tra le collisioni
-                    // Utilizziamo una distanza di collisione maggiore (5 unità) per rendere più facile raccogliere il tesoro
-                    if (window.game.treasure.checkCollision(playerPosition, 5)) {
-                        console.log('TESORO RACCOLTO dal giocatore locale! Posizione:', playerPosition);
-                        
-                        // Invia l'evento al server
-                        window.game.gameSocket.emitTreasureCollected();
-                        
-                        // Aggiorniamo il timestamp dell'ultima collisione
-                        this.lastTreasureCollision = now;
-                        
-                        // Aggiungiamo un feedback visivo più evidente
-                        if (window.game.renderer) {
-                            // Flash giallo più intenso
-                            const originalClearColor = window.game.renderer.getClearColor().getHex();
-                            window.game.renderer.setClearColor(0xffff00, 1);
+                    // Controlla la collisione con tutti i tesori
+                    for (const treasure of window.game.treasures) {
+                        if (treasure && treasure.checkCollision(playerPosition, 5)) {
+                            console.log('TESORO RACCOLTO dal giocatore locale! Tipo:', treasure.type);
                             
-                            // Suono di raccolta (se disponibile)
-                            if (window.game.sounds && window.game.sounds.collect) {
-                                window.game.sounds.collect.play();
+                            // Invia l'evento al server con il tipo di tesoro
+                            window.game.gameSocket.emitTreasureCollected(null, null, treasure.type);
+                            
+                            // Aggiorniamo il timestamp dell'ultima collisione
+                            this.lastTreasureCollision = now;
+                            
+                            // Aggiungiamo un feedback visivo più evidente
+                            if (window.game.renderer) {
+                                // Flash colorato in base al tipo di tesoro
+                                let flashColor;
+                                switch(treasure.type) {
+                                    case 'bonus': flashColor = 0x00aaff; break; // Blu per bonus
+                                    case 'malus': flashColor = 0xff3333; break; // Rosso per malus
+                                    default: flashColor = 0xffff00; // Giallo per normale
+                                }
+                                
+                                const originalClearColor = window.game.renderer.getClearColor().getHex();
+                                window.game.renderer.setClearColor(flashColor, 1);
+                                
+                                // Ripristina il colore originale dopo un breve periodo
+                                setTimeout(() => {
+                                    window.game.renderer.setClearColor(originalClearColor, 1);
+                                }, 300);
                             }
                             
-                            // Ripristina il colore originale dopo un breve periodo
-                            setTimeout(() => {
-                                window.game.renderer.setClearColor(originalClearColor, 1);
-                            }, 300);
+                            break; // Esci dal ciclo dopo aver trovato una collisione
                         }
                     }
                 }
             }
-
+            
             // Invia la posizione e la rotazione al server
             if (window.game && window.game.gameSocket) {
                 window.game.gameSocket.emitPlayerMove(this.getPosition(), this.getRotation());
             }
         } else {
-            // Animazione per i giocatori remoti
+            // Anima i giocatori remoti
             this.animateRemotePlayer();
-            
-            // Assicurati che il nametag sia sempre rivolto verso la camera
-            if (this.nameTag && window.game && window.game.camera) {
+        }
+        
+        // Aggiorna le particelle
+        if (this.particles) {
+            this.particles.rotation.y += 0.01;
+        }
+        
+        // Aggiorna la luce del giocatore
+        if (this.playerLight) {
+            this.playerLight.position.copy(this.model.position);
+            this.playerLight.position.y += 2;
+        }
+        
+        // Aggiorna la posizione del tag con il nome
+        if (this.nameTag) {
+            // Assicurati che il tag del nome sia sempre rivolto verso la camera
+            if (window.game && window.game.camera) {
                 this.nameTag.lookAt(window.game.camera.position);
             }
         }
@@ -584,7 +617,38 @@ class Player {
     }
 
     updateCamera() {
-        // Nessuna azione necessaria poiché la camera è già collegata al modello
+        if (!this.isLocalPlayer || !this.camera) return;
+        
+        // Calcola l'intensità del movimento basata sulla velocità
+        const speed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
+        const isMoving = speed > 0.01;
+        
+        // Effetto di oscillazione durante la camminata
+        if (isMoving) {
+            const time = Date.now() * 0.001;
+            const bobFrequency = this.isRunning ? 12 : 8; // Frequenza più alta durante la corsa
+            const bobAmplitude = this.isRunning ? 0.06 : 0.03; // Ampiezza maggiore durante la corsa
+            
+            // Oscillazione verticale (su e giù)
+            const verticalBob = Math.sin(time * bobFrequency) * bobAmplitude;
+            this.camera.position.y = 2.7 + verticalBob;
+            
+            // Leggera oscillazione laterale (destra e sinistra)
+            const lateralBob = Math.cos(time * bobFrequency * 0.5) * bobAmplitude * 0.5;
+            this.camera.position.x = lateralBob;
+            
+            // Leggera inclinazione della testa
+            const tiltAngle = Math.sin(time * bobFrequency * 0.5) * 0.01;
+            this.camera.rotation.z = tiltAngle;
+        } else {
+            // Ripristina la posizione della camera quando il giocatore è fermo
+            this.camera.position.y = 2.7;
+            this.camera.position.x = 0;
+            this.camera.rotation.z = 0;
+        }
+        
+        // Aggiorna la direzione della camera in base al movimento del mouse
+        // (già gestito da onMouseMove)
     }
 
     setPosition(position) {
@@ -621,19 +685,31 @@ class Player {
     }
 
     animateRemotePlayer() {
-        // Animazione semplice per i giocatori remoti
+        // Animazione avanzata per i giocatori remoti
         const time = Date.now() * 0.001;
+        const isMoving = this.velocity && (Math.abs(this.velocity.x) > 0.01 || Math.abs(this.velocity.z) > 0.01);
+        const animationSpeed = isMoving ? (this.isRunning ? 4 : 2) : 0.5; // Velocità di animazione basata sul movimento
         
-        // Muovi le braccia avanti e indietro
+        // Muovi le braccia avanti e indietro con ampiezza basata sul movimento
         if (this.leftArm && this.rightArm) {
-            this.leftArm.rotation.x = Math.sin(time * 2) * 0.2;
-            this.rightArm.rotation.x = Math.sin(time * 2 + Math.PI) * 0.2;
+            const armSwing = isMoving ? 0.4 : 0.1; // Ampiezza maggiore quando si muove
+            this.leftArm.rotation.x = Math.sin(time * animationSpeed) * armSwing;
+            this.rightArm.rotation.x = Math.sin(time * animationSpeed + Math.PI) * armSwing;
+            
+            // Aggiungi un leggero movimento laterale alle braccia
+            this.leftArm.rotation.z = Math.cos(time * animationSpeed * 0.5) * 0.05;
+            this.rightArm.rotation.z = -Math.cos(time * animationSpeed * 0.5) * 0.05;
         }
         
-        // Muovi le gambe avanti e indietro
+        // Muovi le gambe avanti e indietro con ampiezza basata sul movimento
         if (this.leftLeg && this.rightLeg) {
-            this.leftLeg.rotation.x = Math.sin(time * 2) * 0.2;
-            this.rightLeg.rotation.x = Math.sin(time * 2 + Math.PI) * 0.2;
+            const legSwing = isMoving ? 0.5 : 0.1; // Ampiezza maggiore quando si muove
+            this.leftLeg.rotation.x = Math.sin(time * animationSpeed) * legSwing;
+            this.rightLeg.rotation.x = Math.sin(time * animationSpeed + Math.PI) * legSwing;
+            
+            // Aggiungi un leggero movimento laterale alle gambe
+            this.leftLeg.rotation.z = Math.cos(time * animationSpeed * 0.5) * 0.03;
+            this.rightLeg.rotation.z = -Math.cos(time * animationSpeed * 0.5) * 0.03;
         }
         
         // Fai ruotare le particelle
@@ -641,9 +717,18 @@ class Player {
             this.particles.rotation.y = time;
         }
         
-        // Fai oscillare leggermente il personaggio
+        // Fai oscillare leggermente il personaggio in base al movimento
         if (this.model) {
-            this.model.position.y += Math.sin(time * 1.5) * 0.01;
+            // Oscillazione verticale più pronunciata durante il movimento
+            const bounceHeight = isMoving ? 0.03 : 0.01;
+            const bounceSpeed = isMoving ? 2 : 1;
+            this.model.position.y += Math.sin(time * animationSpeed * bounceSpeed) * bounceHeight;
+            
+            // Leggera inclinazione durante il movimento
+            if (isMoving) {
+                const leanAmount = 0.02;
+                this.model.rotation.z = Math.sin(time * animationSpeed) * leanAmount;
+            }
         }
     }
 

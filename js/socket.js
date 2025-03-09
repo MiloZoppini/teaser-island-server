@@ -2,6 +2,7 @@ class GameSocket {
     constructor() {
         this.socket = null;
         this.playerId = this.generatePlayerId(); // Genera un ID univoco per il giocatore
+        this.playerNickname = localStorage.getItem('playerNickname') || 'Giocatore'; // Recupera il nickname dal localStorage
         this.matchId = null; // ID della partita corrente
         this.onGameState = null;
         this.onPlayerJoined = null;
@@ -68,8 +69,8 @@ class GameSocket {
         });
 
         this.socket.on('playerJoined', (data) => {
-            console.log('Player joined:', data.id, data.position);
-            if (this.onPlayerJoined) this.onPlayerJoined(data.id, data.position);
+            console.log('Player joined:', data.id, data.position, data.nickname);
+            if (this.onPlayerJoined) this.onPlayerJoined(data.id, data.position, data.nickname);
         });
 
         this.socket.on('playerMoved', (data) => {
@@ -108,6 +109,13 @@ class GameSocket {
             this.matchId = data.matchId;
             if (this.onMatchFound) this.onMatchFound(data.matchId, data.players, data.position);
         });
+        
+        // Evento per aggiornare il contatore dei giocatori online
+        this.socket.on('onlinePlayersUpdate', (count) => {
+            console.log('Online players update:', count);
+            document.getElementById('online-players-count').textContent = count;
+            document.getElementById('online-players-count-hud').textContent = count;
+        });
     }
 
     /**
@@ -119,9 +127,10 @@ class GameSocket {
             return;
         }
         
-        console.log('Requesting matchmaking with player ID:', this.playerId);
+        console.log('Requesting matchmaking with player ID:', this.playerId, 'and nickname:', this.playerNickname);
         this.socket.emit('requestMatchmaking', {
-            playerId: this.playerId
+            playerId: this.playerId,
+            nickname: this.playerNickname
         });
     }
 

@@ -750,12 +750,12 @@ class Game {
 
     setupSocketHandlers() {
         // Gestione degli eventi del socket
-        this.gameSocket.onPlayerJoined = (id, position) => {
-            console.log(`Player joined: ${id}`);
+        this.gameSocket.onPlayerJoined = (id, position, nickname) => {
+            console.log(`Player joined: ${id}, nickname: ${nickname}`);
             if (!this.players.has(id)) {
                 // Se siamo in lobby, non creiamo ancora i giocatori remoti
                 if (!this.inLobby || id === this.gameSocket.playerId) {
-                    this.addPlayer(id, position, id === this.gameSocket.playerId);
+                    this.addPlayer(id, position, id === this.gameSocket.playerId, nickname);
                     if (id === this.gameSocket.playerId) {
                         console.log('Local player set:', this.localPlayer);
                     }
@@ -795,6 +795,9 @@ class Game {
                     
                     // Incrementa il contatore dei tesori raccolti
                     this.treasuresCollected++;
+                    
+                    // Mostra un messaggio temporaneo con il tipo di tesoro raccolto
+                    this.showTreasureMessage(treasureType);
                 }
             }
 
@@ -841,7 +844,7 @@ class Game {
             
             data.players.forEach(([id, playerData]) => {
                 if (!this.players.has(id)) {
-                    this.addPlayer(id, playerData.position, id === this.gameSocket.playerId);
+                    this.addPlayer(id, playerData.position, id === this.gameSocket.playerId, playerData.nickname);
                     if (id === this.gameSocket.playerId) {
                         console.log('Local player set:', this.localPlayer);
                         // Assicurati che il punteggio del giocatore locale sia 0
@@ -885,63 +888,61 @@ class Game {
         };
         
         // Gestione degli eventi di lobby e matchmaking
-        this.gameSocket.onLobbyUpdate = (playersInLobby, maxPlayers) => {
-            console.log(`Lobby update: ${playersInLobby}/${maxPlayers} players`);
+        this.gameSocket.onLobbyUpdate = (playersCount, maxPlayers) => {
+            console.log(`Lobby update: ${playersCount}/${maxPlayers} players`);
             
             // Aggiorna l'interfaccia della lobby
-            this.playersCount.textContent = playersInLobby;
-            this.maxPlayers.textContent = maxPlayers;
+            document.getElementById('players-count').textContent = playersCount;
+            document.getElementById('max-players').textContent = maxPlayers;
             
             // Aggiorna la barra di progresso
-            const progress = (playersInLobby / maxPlayers) * 100;
-            this.lobbyProgress.style.width = `${progress}%`;
+            const progressBar = document.getElementById('lobby-progress');
+            const progressPercentage = (playersCount / maxPlayers) * 100;
+            progressBar.style.width = `${progressPercentage}%`;
             
-            // Aggiorna lo stato della lobby
-            if (playersInLobby < 2) {
-                this.lobbyStatus.textContent = "Esplora l'isola mentre aspetti altri giocatori...";
+            // Mostra o nascondi la schermata della lobby
+            const lobbyScreen = document.getElementById('lobby-screen');
+            if (playersCount < maxPlayers) {
+                lobbyScreen.classList.remove('hidden');
+                document.getElementById('lobby-status').textContent = 'Esplora l\'isola mentre aspetti...';
             } else {
-                this.lobbyStatus.textContent = "Partita in preparazione...";
+                document.getElementById('lobby-status').textContent = 'Partita in avvio...';
+                // Nascondi la lobby dopo 3 secondi
+                setTimeout(() => {
+                    lobbyScreen.classList.add('hidden');
+                    // Inizia la partita
+                    this.startGame();
+                }, 3000);
             }
         };
         
-        this.gameSocket.onMatchFound = (matchId, players, initialPosition) => {
-            console.log('Match found! Match ID:', matchId);
-            this.matchId = matchId;
-            this.inLobby = false;
-            this.gameStarted = true;
+        // Aggiungi un handler per l'evento di inizio partita
+        this.gameSocket.onMatchFound = (matchId, players, startPosition) => {
+            console.log(`Match found: ${matchId} with ${players.length} players`);
             
             // Nascondi la schermata della lobby
-            this.lobbyScreen.classList.add('hidden');
+            document.getElementById('lobby-screen').classList.add('hidden');
             
-            // Mostra le informazioni sui tesori
-            document.getElementById('treasure-info').classList.remove('hidden');
-            
-            // Rimuovi il giocatore locale temporaneo se esiste
-            if (this.localPlayer) {
-                this.localPlayer.dispose();
-                this.localPlayer = null;
-            }
-            
-            // Rimuovi anche eventuali giocatori temporanei dalla mappa
+            // Rimuovi il giocatore temporaneo della lobby se esiste
             if (this.players.has('local-temp')) {
-                const tempPlayer = this.players.get('local-temp');
-                tempPlayer.dispose();
-                this.players.delete('local-temp');
+                this.removePlayer('local-temp');
             }
             
-            // Crea il giocatore locale nella posizione iniziale
-            this.localPlayer = new Player(this.scene, initialPosition, true);
-            this.players.set(this.gameSocket.playerId, this.localPlayer);
+            // Resetta lo stato del gioco
+            this.resetGame();
             
-            // Aggiungi gli altri giocatori
+            // Crea il giocatore locale nella posizione di partenza
+            this.addPlayer(this.gameSocket.playerId, startPosition, true, this.gameSocket.playerNickname);
+            
+            // Crea i giocatori remoti
             players.forEach(player => {
                 if (player.id !== this.gameSocket.playerId) {
-                    const newPlayer = new Player(this.scene, player.position, false);
-                    this.players.set(player.id, newPlayer);
+                    this.addPlayer(player.id, player.position, false, player.nickname);
                 }
             });
             
-            console.log('Game started with', players.length, 'players');
+            // Inizia la partita
+            this.startGame();
         };
         
         // Connetti al server
@@ -980,9 +981,9 @@ class Game {
             `Vincitore: ${winner === this.gameSocket.playerId ? 'Tu' : 'Giocatore ' + winner} con ${maxScore} tesori!`;
     }
 
-    addPlayer(id, position, isLocalPlayer) {
-        console.log(`Adding player ${id}, isLocalPlayer: ${isLocalPlayer}`);
-        const player = new Player(this.scene, position, isLocalPlayer);
+    addPlayer(id, position, isLocalPlayer, nickname = null) {
+        console.log(`Adding player ${id}, isLocalPlayer: ${isLocalPlayer}, nickname: ${nickname}`);
+        const player = new Player(this.scene, position, isLocalPlayer, nickname);
         this.players.set(id, player);
         if (isLocalPlayer) {
             this.localPlayer = player;
@@ -1279,6 +1280,81 @@ class Game {
             y: 0,
             z: Math.sin(angle) * radius
         };
+    }
+
+    // Funzione per mostrare un messaggio temporaneo con il tipo di tesoro raccolto
+    showTreasureMessage(treasureType) {
+        // Crea un elemento per il messaggio
+        const messageElement = document.createElement('div');
+        messageElement.className = `treasure-message ${treasureType}`;
+        
+        let icon, text, points;
+        switch(treasureType) {
+            case 'bonus':
+                icon = '💎';
+                text = 'Tesoro Bonus';
+                points = '+2';
+                break;
+            case 'malus':
+                icon = '💀';
+                text = 'Tesoro Malus';
+                points = '-1';
+                break;
+            default:
+                icon = '🏆';
+                text = 'Tesoro';
+                points = '+1';
+        }
+        
+        messageElement.innerHTML = `<span class="treasure-icon">${icon}</span> ${text} <span class="points">${points}</span>`;
+        document.body.appendChild(messageElement);
+        
+        // Rimuovi il messaggio dopo 2 secondi
+        setTimeout(() => {
+            messageElement.classList.add('fade-out');
+            setTimeout(() => {
+                document.body.removeChild(messageElement);
+            }, 500);
+        }, 2000);
+    }
+    
+    // Funzione per iniziare la partita
+    startGame() {
+        console.log('Starting game...');
+        
+        // Imposta lo stato del gioco
+        this.inLobby = false;
+        this.gameStarted = true;
+        
+        // Mostra l'HUD
+        document.getElementById('hud').classList.remove('hidden');
+        document.getElementById('treasure-info').classList.remove('hidden');
+        
+        // Crea il primo tesoro
+        const treasurePosition = this.generateRandomTreasurePosition();
+        this.createTreasure(treasurePosition, 'normal');
+        
+        // Avvia il timer di gioco
+        this.setupGameTimer();
+    }
+    
+    // Funzione per resettare lo stato del gioco
+    resetGame() {
+        console.log('Resetting game state...');
+        
+        // Resetta i contatori
+        this.treasuresCollected = 0;
+        
+        // Rimuovi tutti i tesori esistenti
+        this.treasures.forEach(treasure => {
+            if (treasure) {
+                treasure.dispose();
+            }
+        });
+        this.treasures = [];
+        
+        // Resetta il punteggio nell'interfaccia utente
+        document.getElementById('score').textContent = 'Tesori: 0';
     }
 }
 

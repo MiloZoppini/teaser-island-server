@@ -10,7 +10,23 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.134.0/examples/js/loaders/GLTFLoader.js"></script>
 </head>
 <body>
+    <!-- Schermata di login -->
+    <div id="login-screen" class="overlay">
+        <div class="overlay-content">
+            <h2>Teaser Island</h2>
+            <p>Inserisci il tuo nickname per iniziare a giocare!</p>
+            <div class="form-group">
+                <input type="text" id="nickname-input" placeholder="Nickname" maxlength="15">
+                <button id="start-game-btn">Inizia a giocare</button>
+            </div>
+            <div class="online-players">
+                <p>Giocatori online: <span id="online-players-count">0</span></p>
+            </div>
+        </div>
+    </div>
+
     <div id="game-container"></div>
+    
     <div id="hud">
         <div id="score">Tesori: 0</div>
         <div id="timer">10:00</div>
@@ -25,8 +41,12 @@
                 <span class="treasure-icon">💀</span> Tesoro rosso: -1 punto
             </div>
         </div>
+        <div id="online-players-indicator">
+            Giocatori online: <span id="online-players-count-hud">0</span>
+        </div>
     </div>
-    <div id="lobby-screen" class="overlay-transparent">
+    
+    <div id="lobby-screen" class="overlay-transparent hidden">
         <div class="overlay-content-transparent">
             <h2>In attesa di altri giocatori</h2>
             <div id="lobby-players">Giocatori: <span id="players-count">1</span>/<span id="max-players">4</span></div>
@@ -36,6 +56,7 @@
             <p id="lobby-status">Esplora l'isola mentre aspetti...</p>
         </div>
     </div>
+    
     <div id="game-over" class="overlay hidden">
         <div class="overlay-content">
             <h2>Game Over!</h2>
@@ -43,6 +64,17 @@
             <button id="restart-button">Rigioca</button>
         </div>
     </div>
+    
+    <div id="game-instructions" class="game-instructions">
+        <h3>Comandi:</h3>
+        <p>W, A, S, D: Movimento</p>
+        <p>Mouse: Guarda intorno</p>
+        <p>Spazio: Salta</p>
+        <p>Doppio W: Corri</p>
+        <p>ESC: Menu</p>
+        <button id="close-instructions">Chiudi</button>
+    </div>
+    
     <script src="/js/water.js"></script>
     <script src="/js/sky.js"></script>
     <script src="/js/clouds.js"></script>
@@ -50,5 +82,96 @@
     <script src="/js/player.js"></script>
     <script src="/js/treasure.js"></script>
     <script src="/js/game.js"></script>
+    <script>
+        // Gestione della schermata di login
+        document.addEventListener('DOMContentLoaded', function() {
+            const loginScreen = document.getElementById('login-screen');
+            const nicknameInput = document.getElementById('nickname-input');
+            const startGameBtn = document.getElementById('start-game-btn');
+            const onlinePlayersCount = document.getElementById('online-players-count');
+            const onlinePlayersCountHud = document.getElementById('online-players-count-hud');
+            const closeInstructionsBtn = document.getElementById('close-instructions');
+            const gameInstructions = document.getElementById('game-instructions');
+            const lobbyScreen = document.getElementById('lobby-screen');
+            
+            // Nascondi le istruzioni all'inizio
+            gameInstructions.classList.add('hidden');
+            
+            // Aggiorna il contatore dei giocatori online ogni 5 secondi
+            function updateOnlinePlayers() {
+                fetch('/api/online-players')
+                    .then(response => response.json())
+                    .then(data => {
+                        onlinePlayersCount.textContent = data.count;
+                        onlinePlayersCountHud.textContent = data.count;
+                    })
+                    .catch(error => console.error('Error fetching online players:', error));
+            }
+            
+            // Aggiorna subito e poi ogni 5 secondi
+            updateOnlinePlayers();
+            setInterval(updateOnlinePlayers, 5000);
+            
+            // Recupera il nickname salvato, se presente
+            const savedNickname = localStorage.getItem('playerNickname');
+            if (savedNickname) {
+                nicknameInput.value = savedNickname;
+            }
+            
+            // Gestione del pulsante di avvio
+            startGameBtn.addEventListener('click', function() {
+                const nickname = nicknameInput.value.trim();
+                if (nickname.length < 3) {
+                    alert('Inserisci un nickname di almeno 3 caratteri!');
+                    return;
+                }
+                
+                // Salva il nickname nel localStorage
+                localStorage.setItem('playerNickname', nickname);
+                
+                // Nascondi la schermata di login
+                loginScreen.classList.add('hidden');
+                
+                // Mostra la schermata della lobby
+                lobbyScreen.classList.remove('hidden');
+                
+                // Inizializza il gioco
+                window.gameSocket = new GameSocket();
+                window.gameSocket.playerNickname = nickname;
+                window.game = new Game();
+                
+                // Connetti al server
+                window.gameSocket.connect();
+            });
+            
+            // Gestione del tasto Invio nel campo nickname
+            nicknameInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    startGameBtn.click();
+                }
+            });
+            
+            // Gestione del pulsante di chiusura delle istruzioni
+            closeInstructionsBtn.addEventListener('click', function() {
+                gameInstructions.classList.add('hidden');
+            });
+            
+            // Mostra le istruzioni quando si preme ESC
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    if (gameInstructions.classList.contains('hidden')) {
+                        gameInstructions.classList.remove('hidden');
+                    } else {
+                        gameInstructions.classList.add('hidden');
+                    }
+                }
+            });
+            
+            // Gestione del pulsante di riavvio
+            document.getElementById('restart-button').addEventListener('click', function() {
+                location.reload();
+            });
+        });
+    </script>
 </body>
 </html> 
