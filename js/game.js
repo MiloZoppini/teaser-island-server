@@ -917,31 +917,77 @@ class Game {
         };
         
         // Aggiungi un handler per l'evento di inizio partita
-        this.gameSocket.onMatchFound = (matchId, players, startPosition) => {
-            console.log(`Match found: ${matchId} with ${players.length} players`);
+        this.gameSocket.onMatchStart = (data) => {
+            console.log(`Match started: ${data.matchId}, Players: ${JSON.stringify(data.players)}`);
             
-            // Nascondi la schermata della lobby
+            this.matchId = data.matchId;
+            
             document.getElementById('lobby-screen').classList.add('hidden');
             
-            // Rimuovi il giocatore temporaneo della lobby se esiste
             if (this.players.has('local-temp')) {
                 this.removePlayer('local-temp');
             }
             
-            // Resetta lo stato del gioco
             this.resetGame();
             
-            // Crea il giocatore locale nella posizione di partenza
-            this.addPlayer(this.gameSocket.playerId, startPosition, true, this.gameSocket.playerNickname);
+            // Ottieni la posizione del giocatore locale
+            const localPlayerPosition = data.positions[this.gameSocket.playerId];
             
-            // Crea i giocatori remoti
-            players.forEach(player => {
-                if (player.id !== this.gameSocket.playerId) {
-                    this.addPlayer(player.id, player.position, false, player.nickname);
+            if (!localPlayerPosition) {
+                console.error('Posizione del giocatore locale non trovata nei dati ricevuti');
+                return;
+            }
+            
+            const startPosition = {
+                x: localPlayerPosition.x,
+                y: this.getTerrainHeight(localPlayerPosition.x, localPlayerPosition.z) + 1,
+                z: localPlayerPosition.z
+            };
+            
+            // Ottieni il nickname del giocatore locale
+            const localPlayerNickname = data.nicknames ? 
+                data.nicknames[this.gameSocket.playerId] : 
+                this.gameSocket.playerNickname;
+            
+            console.log(`Aggiungo giocatore locale ${this.gameSocket.playerId} (${localPlayerNickname}) in posizione:`, startPosition);
+            this.addPlayer(this.gameSocket.playerId, startPosition, true, localPlayerNickname);
+            
+            // Aggiungi gli altri giocatori
+            data.players.forEach(playerId => {
+                if (playerId !== this.gameSocket.playerId) {
+                    const playerPosition = data.positions[playerId];
+                    
+                    if (!playerPosition) {
+                        console.error(`Posizione del giocatore ${playerId} non trovata nei dati ricevuti`);
+                        return;
+                    }
+                    
+                    const remotePosition = {
+                        x: playerPosition.x,
+                        y: this.getTerrainHeight(playerPosition.x, playerPosition.z) + 1,
+                        z: playerPosition.z
+                    };
+                    
+                    // Ottieni il nickname del giocatore remoto
+                    const playerNickname = data.nicknames ? 
+                        data.nicknames[playerId] : 
+                        `Player-${playerId.substring(0, 5)}`;
+                    
+                    console.log(`Aggiungo giocatore remoto ${playerId} (${playerNickname}) in posizione:`, remotePosition);
+                    this.addPlayer(playerId, remotePosition, false, playerNickname);
                 }
             });
             
-            // Inizia la partita
+            // Aggiungi i tesori
+            data.treasures.forEach(treasure => {
+                const treasurePosition = {
+                    x: treasure.position.x,
+                    y: this.getTerrainHeight(treasure.position.x, treasure.position.z) + 1,
+                    z: treasure.position.z
+                };
+                this.createTreasure(treasurePosition, treasure.type);
+            });
+            
             this.startGame();
         };
         

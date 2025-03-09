@@ -688,12 +688,19 @@ function startMatch() {
     }
     
     // Prepara i dati dei giocatori con i loro nickname
-    const playersData = {};
+    const playersData = [];
     for (const [playerId, playerData] of matchPlayers.entries()) {
-        playersData[playerId] = {
+        playersData.push({
+            id: playerId,
             nickname: playerData.nickname,
             position: playerPositions[playerId]
-        };
+        });
+    }
+    
+    // Prepara i nickname in un oggetto per un accesso più facile
+    const nicknames = {};
+    for (const [playerId, playerData] of matchPlayers.entries()) {
+        nicknames[playerId] = playerData.nickname;
     }
     
     // Invia l'evento di inizio partita a tutti i giocatori
@@ -711,9 +718,7 @@ function startMatch() {
                     matchId,
                     players: Array.from(matchPlayers.keys()),
                     positions: playerPositions,
-                    nicknames: Object.fromEntries(
-                        Array.from(matchPlayers.entries()).map(([id, data]) => [id, data.nickname])
-                    ),
+                    nicknames: nicknames,
                     treasures: treasurePositions
                 });
                 
