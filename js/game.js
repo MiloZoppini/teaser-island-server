@@ -756,24 +756,25 @@ class Game {
     setupSocketHandlers() {
         // Gestione degli eventi del socket
         this.gameSocket.onPlayerJoined = (data) => {
-            const id = data.id || data;
-            const position = data.position || { x: 0, y: 0, z: 0 };
-            const nickname = data.nickname || 'Sconosciuto';
+            console.log('onPlayerJoined ricevuto:', data);
+            
+            // Estrai i dati del giocatore
+            const id = typeof data === 'object' ? data.id : data;
+            const position = typeof data === 'object' && data.position ? data.position : { x: 0, y: 0, z: 0 };
+            const nickname = typeof data === 'object' && data.nickname ? data.nickname : 'Sconosciuto';
             
             console.log(`Player joined: ${id}, nickname: ${nickname}, position:`, position);
             
+            // Aggiungi il giocatore solo se non esiste già e non siamo in lobby
             if (!this.players.has(id) && !this.inLobby) {
                 const adjustedPosition = {
                     x: position.x,
                     y: this.getTerrainHeight(position.x, position.z) + 1,
                     z: position.z
                 };
+                
+                console.log(`Aggiungo giocatore remoto ${id} (${nickname}) in posizione:`, adjustedPosition);
                 this.addPlayer(id, adjustedPosition, id === this.gameSocket.playerId, nickname);
-                if (id === this.gameSocket.playerId) {
-                    console.log('Local player set:', this.localPlayer);
-                } else {
-                    console.log(`Remote player ${nickname} added to scene`);
-                }
             }
         };
 
@@ -783,12 +784,17 @@ class Game {
         };
 
         this.gameSocket.onPlayerMoved = (data) => {
-            const id = data.id;
-            const position = data.position;
-            const rotation = data.rotation;
+            // Estrai i dati del movimento
+            const id = typeof data === 'object' ? data.id : null;
+            const position = typeof data === 'object' && data.position ? data.position : null;
+            const rotation = typeof data === 'object' && data.rotation ? data.rotation : null;
             
-            console.log(`Player moved: ${id}, position:`, position);
+            if (!id || !position) {
+                console.error('Dati di movimento non validi:', data);
+                return;
+            }
             
+            // Aggiorna la posizione del giocatore remoto
             const player = this.players.get(id);
             if (player && !player.isLocalPlayer) {
                 const adjustedPosition = {
@@ -796,6 +802,7 @@ class Game {
                     y: this.getTerrainHeight(position.x, position.z) + 1,
                     z: position.z
                 };
+                
                 player.setPosition(adjustedPosition);
                 if (rotation) {
                     player.setRotation(rotation);
@@ -938,17 +945,25 @@ class Game {
         
         // Aggiungi un handler per l'evento di inizio partita
         this.gameSocket.onMatchStart = (data) => {
-            console.log(`Match started: ${data.matchId}, Players:`, data.players);
-            console.log('Posizioni dei giocatori:', data.positions);
-            console.log('Nickname dei giocatori:', data.nicknames);
+            console.log(`Match started: ${data.matchId}`);
+            console.log('Players:', data.players);
+            console.log('Positions:', data.positions);
+            console.log('Nicknames:', data.nicknames);
             
             this.matchId = data.matchId;
             
+            // Nascondi la schermata della lobby
             document.getElementById('lobby-screen').classList.add('hidden');
             
+            // Rimuovi il giocatore temporaneo della lobby se esiste
             if (this.players.has('local-temp')) {
                 this.removePlayer('local-temp');
             }
+            
+            // Rimuovi tutti i giocatori esistenti
+            this.players.forEach((player, id) => {
+                this.removePlayer(id);
+            });
             
             this.resetGame();
             
@@ -1075,13 +1090,33 @@ class Game {
 
     addPlayer(id, position, isLocalPlayer = false, nickname = 'Sconosciuto') {
         console.log(`Aggiungo giocatore ${id} (${nickname}) in posizione:`, position);
-        const player = new Player(this.scene, position, isLocalPlayer, nickname);
-        this.players.set(id, player);
-        if (isLocalPlayer) {
-            this.localPlayer = player;
-            this.localPlayer.score = 0;
+        
+        // Verifica se il giocatore esiste già
+        if (this.players.has(id)) {
+            console.log(`Giocatore ${id} già esistente, lo rimuovo prima di ricrearlo`);
+            this.removePlayer(id);
         }
-        this.updateScoresTable();
+        
+        try {
+            // Crea un nuovo giocatore
+            const player = new Player(this.scene, position, isLocalPlayer, nickname);
+            this.players.set(id, player);
+            
+            if (isLocalPlayer) {
+                this.localPlayer = player;
+                this.localPlayer.score = 0;
+                console.log('Giocatore locale impostato:', this.localPlayer);
+            } else {
+                console.log(`Giocatore remoto ${nickname} (${id}) aggiunto alla scena`);
+            }
+            
+            // Aggiorna la tabella dei punteggi
+            this.updateScoresTable();
+            
+            return player;
+        } catch (error) {
+            console.error(`Errore nella creazione del giocatore ${id}:`, error);
+        }
     }
 
     removePlayer(id) {

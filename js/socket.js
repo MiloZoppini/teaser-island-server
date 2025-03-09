@@ -1,358 +1,234 @@
 class GameSocket {
     constructor() {
         this.socket = null;
-        this.playerId = this.generatePlayerId(); // Genera un ID univoco per il giocatore
-        
-        // Genera un nickname italiano casuale se non è già salvato nel localStorage
-        this.playerNickname = localStorage.getItem('playerNickname') || this.generateRandomItalianName();
-        
-        this.matchId = null; // ID della partita corrente
-        this.onGameState = null;
-        this.onPlayerJoined = null;
-        this.onPlayerMoved = null;
-        this.onPlayerLeft = null;
-        this.onTreasureCollected = null;
-        this.onGameOver = null;
-        this.onLobbyUpdate = null; // Nuovo evento per aggiornamenti della lobby
-        this.onMatchFound = null; // Nuovo evento per quando viene trovata una partita
+        this.playerId = null;
+        this.playerNickname = null;
         this.connected = false;
-        this.pingInterval = null; // Intervallo per il ping
-        this.lastPositionUpdate = 0; // Timestamp dell'ultimo aggiornamento di posizione
-        this.lastPosition = null; // Ultima posizione inviata
-        this.lastRotation = null; // Ultima rotazione inviata
+        
+        // Callbacks
+        this.onPlayerJoined = null;
+        this.onPlayerLeft = null;
+        this.onPlayerMoved = null;
+        this.onTreasureCollected = null;
+        this.onTreasureUpdate = null;
+        this.onScoreUpdate = null;
+        this.onMatchStart = null;
+        this.onGameOver = null;
+        this.onLobbyUpdate = null;
+        this.onOnlinePlayersUpdate = null;
+        
+        // Connetti automaticamente
+        this.connect();
     }
-
-    /**
-     * Genera un ID univoco per il giocatore
-     */
-    generatePlayerId() {
-        return 'player-' + Math.random().toString(36).substr(2, 9);
-    }
-
-    /**
-     * Genera un nickname italiano casuale
-     */
-    generateRandomItalianName() {
-        const firstNames = [
-            "Marco", "Sofia", "Luca", "Giulia", "Alessandro", "Martina", "Davide", "Chiara",
-            "Francesco", "Anna", "Matteo", "Sara", "Lorenzo", "Elena", "Simone", "Valentina",
-            "Andrea", "Laura", "Giovanni", "Francesca", "Riccardo", "Elisa", "Tommaso", "Giorgia"
-        ];
-        
-        const suffixes = [
-            "Player", "Gamer", "Pro", "Master", "Champion", "Hero", "Warrior", "King",
-            "Queen", "Legend", "Boss", "Ninja", "Pirata", "Cacciatore", "Esploratore", "Avventuriero"
-        ];
-        
-        const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
-        const suffix = suffixes[Math.floor(Math.random() * suffixes.length)];
-        
-        const nickname = `${firstName}${suffix}`;
-        
-        // Salva il nickname nel localStorage per mantenerlo tra le sessioni
-        localStorage.setItem('playerNickname', nickname);
-        
-        return nickname;
-    }
-
+    
     connect() {
-        console.log('Attempting to connect to server...');
-        
-        // Usa l'URL di produzione su Render.com o localhost per lo sviluppo locale
-        const serverUrl = window.location.hostname === 'localhost' 
-            ? 'http://localhost:10000' // Usa la porta 10000 anche in locale
-            : window.location.origin;
+        try {
+            // Ottieni l'URL del server dal localStorage o usa il default
+            const serverUrl = localStorage.getItem('serverUrl') || window.location.origin;
+            console.log(`Connecting to server: ${serverUrl}`);
             
-        this.socket = io(serverUrl, {
-            reconnection: true,
-            reconnectionAttempts: 10,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000,
-            timeout: 20000,
-            autoConnect: true,
-            transports: ['websocket', 'polling']
-        });
-        
-        // Gestione degli eventi di connessione
-        this.socket.on('connect', () => {
-            console.log('Connected to server with ID:', this.socket.id);
-            this.connected = true;
-            
-            // Richiedi di entrare nella lobby
-            this.requestMatchmaking();
-            
-            // Avvia il ping periodico
-            this.startPing();
-        });
-        
-        this.socket.on('connect_error', (error) => {
-            console.error('Connection error:', error);
-            this.connected = false;
-            this.stopPing();
-            
-            // Tenta di riconnettersi dopo un breve ritardo
-            setTimeout(() => {
-                if (!this.connected) {
-                    console.log('Attempting to reconnect...');
-                    this.socket.connect();
-                }
-            }, 3000);
-        });
-        
-        this.socket.on('disconnect', (reason) => {
-            console.log('Disconnected from server:', reason);
-            this.connected = false;
-            this.stopPing();
-            
-            // Tenta di riconnettersi se la disconnessione non è volontaria
-            if (reason !== 'io client disconnect') {
-                setTimeout(() => {
-                    if (!this.connected) {
-                        console.log('Attempting to reconnect after disconnect...');
-                        this.socket.connect();
-                    }
-                }, 3000);
-            }
-        });
-        
-        this.setupListeners();
-    }
-
-    setupListeners() {
-        if (!this.socket) {
-            console.error('Socket not initialized. Call connect() first.');
-            return;
-        }
-        
-        console.log('Setting up socket listeners...');
-        
-        this.socket.on('gameState', (data) => {
-            console.log('Received game state:', data);
-            this.playerId = data.playerId;
-            if (this.onGameState) this.onGameState(data);
-        });
-
-        this.socket.on('playerJoined', (data) => {
-            console.log('Player joined:', data.id, data.position, data.nickname);
-            if (this.onPlayerJoined) this.onPlayerJoined(data.id, data.position, data.nickname);
-        });
-
-        this.socket.on('playerMoved', (data) => {
-            // Non logghiamo ogni movimento per evitare spam nella console
-            if (this.onPlayerMoved) {
-                // Verifica che i dati siano validi
-                if (data && data.id && data.position) {
-                    this.onPlayerMoved(data.id, data.position, data.rotation);
-                } else {
-                    console.warn('Ricevuti dati di movimento non validi:', data);
-                }
-            }
-        });
-
-        this.socket.on('playerLeft', (id) => {
-            console.log('Player left:', id);
-            if (this.onPlayerLeft) this.onPlayerLeft(id);
-        });
-
-        this.socket.on('treasureCollected', (id, position) => {
-            console.log('Treasure collected by player:', id);
-            if (this.onTreasureCollected) this.onTreasureCollected(id, position);
-        });
-        
-        this.socket.on('treasureUpdate', (data) => {
-            console.log('Treasure update received:', data);
-            if (this.onTreasureCollected) this.onTreasureCollected(data.playerId, data.position, data.playerScore, data.treasureType);
-        });
-        
-        this.socket.on('gameOver', (data) => {
-            console.log('Game over. Winner:', data.winnerId);
-            if (this.onGameOver) this.onGameOver(data.winnerId, data.scores, data.reason);
-        });
-        
-        // Nuovi eventi per il sistema di lobby e matchmaking
-        this.socket.on('lobbyUpdate', (data) => {
-            console.log('Lobby update:', data);
-            if (this.onLobbyUpdate) this.onLobbyUpdate(data.playersInLobby, data.maxPlayers);
-        });
-        
-        this.socket.on('matchStart', (data) => {
-            console.log('Match start received:', data);
-            this.matchId = data.matchId;
-            
-            // Verifica che i dati siano validi
-            if (!data.positions || !data.players) {
-                console.error('Dati di matchStart non validi:', data);
-                return;
-            }
-            
-            // Trova la posizione del giocatore locale
-            const myPosition = data.positions[this.playerId];
-            if (!myPosition) {
-                console.error('Posizione del giocatore locale non trovata nei dati di matchStart');
-                return;
-            }
-            
-            // Crea un array di oggetti giocatore con id, position e nickname
-            const players = data.players.map(playerId => {
-                // Usa il nickname fornito dal server o genera uno basato sull'ID
-                const nickname = data.nicknames && data.nicknames[playerId] 
-                    ? data.nicknames[playerId] 
-                    : (playerId === this.playerId ? this.playerNickname : `Player-${playerId.substring(0, 5)}`);
-                
-                return {
-                    id: playerId,
-                    position: data.positions[playerId],
-                    nickname: nickname
-                };
+            // Crea una nuova connessione Socket.IO
+            this.socket = io(serverUrl, {
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax: 5000,
+                timeout: 20000
             });
             
-            if (this.onMatchFound) {
-                this.onMatchFound(data.matchId, players, myPosition);
-            }
-        });
-        
-        // Evento per aggiornare il contatore dei giocatori online
-        this.socket.on('onlinePlayersUpdate', (count) => {
-            console.log('Online players update:', count);
-            const onlinePlayersCount = document.getElementById('online-players-count');
-            if (onlinePlayersCount) {
-                onlinePlayersCount.textContent = count;
-            }
+            // Gestisci gli eventi di connessione
+            this.socket.on('connect', () => this.handleConnect());
+            this.socket.on('disconnect', () => this.handleDisconnect());
+            this.socket.on('connect_error', (error) => this.handleConnectError(error));
             
-            const onlinePlayersCountHud = document.getElementById('online-players-count-hud');
-            if (onlinePlayersCountHud) {
-                onlinePlayersCountHud.textContent = count;
+            // Gestisci gli eventi di gioco
+            this.socket.on('playerJoined', (data) => this.handlePlayerJoined(data));
+            this.socket.on('playerLeft', (id) => this.handlePlayerLeft(id));
+            this.socket.on('playerMoved', (data) => this.handlePlayerMoved(data));
+            this.socket.on('treasureCollected', (playerId, position, type) => this.handleTreasureCollected(playerId, position, type));
+            this.socket.on('treasureUpdate', (data) => this.handleTreasureUpdate(data));
+            this.socket.on('scoreUpdate', (playerId, score) => this.handleScoreUpdate(playerId, score));
+            this.socket.on('matchStart', (data) => this.handleMatchStart(data));
+            this.socket.on('gameOver', (data) => this.handleGameOver(data));
+            this.socket.on('lobbyUpdate', (data) => this.handleLobbyUpdate(data));
+            this.socket.on('onlinePlayersUpdate', (count) => this.handleOnlinePlayersUpdate(count));
+            
+            // Invia ping periodici per mantenere attiva la connessione
+            setInterval(() => {
+                if (this.connected) {
+                    this.socket.emit('ping');
+                }
+            }, 30000); // Ogni 30 secondi
+            
+            console.log('Socket.IO initialized');
+        } catch (error) {
+            console.error('Error initializing Socket.IO:', error);
+        }
+    }
+    
+    handleConnect() {
+        console.log('Connected to server with ID:', this.socket.id);
+        this.playerId = this.socket.id;
+        this.connected = true;
+        
+        // Genera un nickname casuale o usa quello salvato
+        this.playerNickname = localStorage.getItem('playerNickname') || this.generateRandomNickname();
+        localStorage.setItem('playerNickname', this.playerNickname);
+        
+        console.log(`Player nickname: ${this.playerNickname}`);
+        
+        // Richiedi il matchmaking
+        this.requestMatchmaking();
+    }
+    
+    handleDisconnect() {
+        console.log('Disconnected from server');
+        this.connected = false;
+        
+        // Mostra un messaggio di disconnessione
+        const disconnectMessage = document.createElement('div');
+        disconnectMessage.className = 'disconnect-message';
+        disconnectMessage.innerHTML = `
+            <h2>Disconnesso dal server</h2>
+            <p>Tentativo di riconnessione in corso...</p>
+        `;
+        document.body.appendChild(disconnectMessage);
+        
+        // Rimuovi il messaggio dopo 5 secondi
+        setTimeout(() => {
+            if (disconnectMessage.parentNode) {
+                disconnectMessage.parentNode.removeChild(disconnectMessage);
             }
+        }, 5000);
+    }
+    
+    handleConnectError(error) {
+        console.error('Connection error:', error);
+        
+        // Mostra un messaggio di errore
+        const errorMessage = document.createElement('div');
+        errorMessage.className = 'error-message';
+        errorMessage.innerHTML = `
+            <h2>Errore di connessione</h2>
+            <p>${error.message || 'Impossibile connettersi al server'}</p>
+        `;
+        document.body.appendChild(errorMessage);
+        
+        // Rimuovi il messaggio dopo 5 secondi
+        setTimeout(() => {
+            if (errorMessage.parentNode) {
+                errorMessage.parentNode.removeChild(errorMessage);
+            }
+        }, 5000);
+    }
+    
+    handlePlayerJoined(data) {
+        console.log('Player joined:', data);
+        if (this.onPlayerJoined) {
+            this.onPlayerJoined(data);
+        }
+    }
+    
+    handlePlayerLeft(id) {
+        console.log('Player left:', id);
+        if (this.onPlayerLeft) {
+            this.onPlayerLeft(id);
+        }
+    }
+    
+    handlePlayerMoved(data) {
+        // Non logghiamo ogni movimento per evitare spam nella console
+        if (this.onPlayerMoved) {
+            this.onPlayerMoved(data);
+        }
+    }
+    
+    handleTreasureCollected(playerId, position, type) {
+        console.log('Treasure collected:', playerId, position, type);
+        if (this.onTreasureCollected) {
+            this.onTreasureCollected(playerId, position, type);
+        }
+    }
+    
+    handleTreasureUpdate(data) {
+        console.log('Treasure update:', data);
+        if (this.onTreasureUpdate) {
+            this.onTreasureUpdate(data);
+        }
+    }
+    
+    handleScoreUpdate(playerId, score) {
+        console.log('Score update:', playerId, score);
+        if (this.onScoreUpdate) {
+            this.onScoreUpdate(playerId, score);
+        }
+    }
+    
+    handleMatchStart(data) {
+        console.log('Match start:', data);
+        if (this.onMatchStart) {
+            this.onMatchStart(data);
+        }
+    }
+    
+    handleGameOver(data) {
+        console.log('Game over:', data);
+        if (this.onGameOver) {
+            this.onGameOver(data);
+        }
+    }
+    
+    handleLobbyUpdate(data) {
+        console.log('Lobby update:', data);
+        if (this.onLobbyUpdate) {
+            this.onLobbyUpdate(data);
+        }
+    }
+    
+    handleOnlinePlayersUpdate(count) {
+        // Non logghiamo ogni aggiornamento per evitare spam nella console
+        if (this.onOnlinePlayersUpdate) {
+            this.onOnlinePlayersUpdate(count);
+        }
+    }
+    
+    emitPlayerMove(position, rotation) {
+        if (!this.connected) return;
+        
+        this.socket.emit('playerMove', {
+            position: position,
+            rotation: rotation
         });
     }
-
-    /**
-     * Richiedi di entrare nella lobby per il matchmaking
-     */
-    requestMatchmaking() {
-        if (!this.socket || !this.connected) {
-            console.warn('Cannot request matchmaking: not connected to server');
-            return;
-        }
+    
+    emitTreasureCollected(position, matchId, treasureType) {
+        if (!this.connected) return;
         
-        console.log('Requesting matchmaking with player ID:', this.playerId, 'and nickname:', this.playerNickname);
+        this.socket.emit('treasureCollected', {
+            position: position,
+            matchId: matchId,
+            treasureType: treasureType
+        });
+    }
+    
+    requestMatchmaking() {
+        if (!this.connected) return;
+        
+        console.log('Requesting matchmaking with nickname:', this.playerNickname);
+        
         this.socket.emit('requestMatchmaking', {
-            playerId: this.playerId,
             nickname: this.playerNickname
         });
     }
-
-    /**
-     * Invia la posizione e rotazione del giocatore al server
-     * Ottimizzato per inviare aggiornamenti solo quando necessario
-     */
-    emitPlayerMove(position, rotation) {
-        // Verifica se siamo connessi
-        if (!this.socket || !this.connected) {
-            console.warn('Cannot emit playerMove: not connected to server');
-            return;
-        }
-        
-        const now = Date.now();
-        const updateInterval = 100; // Invia aggiornamenti al massimo ogni 100ms
-        
-        // Verifica se è passato abbastanza tempo dall'ultimo aggiornamento
-        if (now - this.lastPositionUpdate < updateInterval) {
-            return;
-        }
-        
-        // Verifica se la posizione è cambiata significativamente
-        const positionChanged = !this.lastPosition || 
-            Math.abs(position.x - this.lastPosition.x) > 0.5 ||
-            Math.abs(position.y - this.lastPosition.y) > 0.5 ||
-            Math.abs(position.z - this.lastPosition.z) > 0.5;
-            
-        // Verifica se la rotazione è cambiata significativamente
-        const rotationChanged = !this.lastRotation ||
-            Math.abs(rotation.y - this.lastRotation.y) > 0.1;
-        
-        // Invia l'aggiornamento solo se qualcosa è cambiato significativamente
-        if (positionChanged || rotationChanged) {
-            this.socket.emit('playerMove', {
-                id: this.playerId,
-                position: position,
-                rotation: rotation,
-                matchId: this.matchId
-            });
-            
-            // Aggiorna i timestamp e le ultime posizioni/rotazioni
-            this.lastPositionUpdate = now;
-            this.lastPosition = { ...position };
-            this.lastRotation = { ...rotation };
-        }
-    }
-
-    emitTreasureCollected(playerId = null, position = null, treasureType = 'normal') {
-        if (!this.socket || !this.connected) {
-            console.warn('Cannot emit treasureCollected: not connected to server');
-            return;
-        }
-        
-        // Log più evidente
-        console.log('=== EMITTING TREASURE COLLECTED EVENT ===');
-        
-        try {
-            // Invia l'evento al server con un timestamp per evitare duplicati
-            this.socket.emit('treasureCollected', {
-                timestamp: Date.now(),
-                playerId: playerId || this.playerId,
-                position: position,
-                matchId: this.matchId,
-                treasureType: treasureType
-            });
-            
-            // Aggiungiamo un log per debug
-            console.log('Evento treasureCollected inviato al server con ID:', this.playerId);
-            if (position) {
-                console.log('Posizione del tesoro inviata:', position);
-            }
-            console.log('Tipo di tesoro inviato:', treasureType);
-            
-            // Verifica che l'evento sia stato inviato correttamente
-            setTimeout(() => {
-                if (this.socket.connected) {
-                    console.log('Socket ancora connesso dopo l\'invio dell\'evento treasureCollected');
-                } else {
-                    console.warn('Socket disconnesso dopo l\'invio dell\'evento treasureCollected');
-                }
-            }, 100);
-        } catch (error) {
-            console.error('Errore nell\'invio dell\'evento treasureCollected:', error);
-        }
-    }
-
-    isCurrentPlayer(id) {
-        return this.playerId === id;
-    }
-
-    /**
-     * Avvia il ping periodico per mantenere attiva la connessione
-     */
-    startPing() {
-        // Ferma eventuali ping precedenti
-        this.stopPing();
-        
-        // Invia un ping ogni 15 secondi (più frequente di prima)
-        this.pingInterval = setInterval(() => {
-            if (this.connected) {
-                console.log('Sending ping to server');
-                this.socket.emit('ping');
-            }
-        }, 15000); // 15 secondi
-    }
     
-    /**
-     * Ferma il ping periodico
-     */
-    stopPing() {
-        if (this.pingInterval) {
-            clearInterval(this.pingInterval);
-            this.pingInterval = null;
-        }
+    generateRandomNickname() {
+        const adjectives = ['Super', 'Mega', 'Ultra', 'Hyper', 'Extreme', 'Epic', 'Awesome', 'Amazing', 'Fantastic', 'Incredible'];
+        const nouns = ['Player', 'Gamer', 'Hero', 'Champion', 'Warrior', 'Knight', 'Ninja', 'Samurai', 'Wizard', 'Mage'];
+        
+        const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
+        const noun = nouns[Math.floor(Math.random() * nouns.length)];
+        
+        return `${adjective}${noun}${Math.floor(Math.random() * 100)}`;
     }
 } 

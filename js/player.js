@@ -27,28 +27,33 @@ class Player {
         this.scene.add(this.model);
         this.setPosition(position);
 
-        // Crea il modello del personaggio in stile Minecraft
-        this.createMinecraftAvatar();
+        try {
+            // Crea il modello del personaggio in stile Minecraft
+            this.createMinecraftAvatar();
 
-        if (isLocalPlayer) {
-            // Rendi invisibili le parti del modello del giocatore locale
-            this.model.traverse(child => {
-                if (child.isMesh) {
-                    child.visible = false;
-                }
-            });
+            if (isLocalPlayer) {
+                // Rendi invisibili le parti del modello del giocatore locale
+                this.model.traverse(child => {
+                    if (child.isMesh) {
+                        child.visible = false;
+                    }
+                });
+                
+                this.setupControls();
+                this.setupCamera();
+                
+                // Crea un elemento per mostrare lo stato della corsa
+                this.createRunningIndicator();
+            } else {
+                // Aggiungi un'etichetta con il nome del giocatore per i giocatori remoti
+                this.addPlayerNameTag();
+            }
             
-            this.setupControls();
-            this.setupCamera();
-            
-            // Crea un elemento per mostrare lo stato della corsa
-            this.createRunningIndicator();
-        } else {
-            // Aggiungi un'etichetta con il nome del giocatore per i giocatori remoti
-            this.addPlayerNameTag();
+            console.log(`Giocatore ${this.playerName} creato con successo`);
+            this.loaded = true;
+        } catch (error) {
+            console.error(`Errore nella creazione del giocatore ${this.playerName}:`, error);
         }
-        
-        console.log(`Giocatore ${this.playerName} creato con successo`);
     }
 
     getRandomPlayerColor() {
