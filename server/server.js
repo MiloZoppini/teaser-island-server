@@ -74,14 +74,17 @@ function getRandomPosition() {
     return position;
 }
 
-// Generate position far from a given point (safe from water)
-function getPositionFarFrom(position, minDistance = 30) {
+// Generate position far from a given point or points (safe from water)
+function getPositionFarFrom(positions, minDistance = 30) {
     // Parametri per generare posizioni sicure sull'isola
     const minRadius = 20; // Minima distanza dal centro
     const maxRadius = 80; // Massima distanza dal centro (per evitare l'acqua)
     
+    // Converti positions in un array se non lo è già
+    const positionsArray = Array.isArray(positions) ? positions : [positions];
+    
     let newPosition;
-    let distance = 0;
+    let minDistanceFound = 0;
     let attempts = 0;
     const maxAttempts = 20;
     
@@ -104,17 +107,32 @@ function getPositionFarFrom(position, minDistance = 30) {
         newPosition.x += (Math.random() - 0.5) * 5;
         newPosition.z += (Math.random() - 0.5) * 5;
         
-        // Calcola la distanza dalla posizione originale
-        distance = Math.sqrt(
-            Math.pow(newPosition.x - position.x, 2) + 
-            Math.pow(newPosition.z - position.z, 2)
-        );
+        // Calcola la distanza minima da tutte le posizioni
+        minDistanceFound = Number.MAX_VALUE;
+        
+        for (const pos of positionsArray) {
+            if (!pos || typeof pos !== 'object') continue;
+            
+            const distance = Math.sqrt(
+                Math.pow(newPosition.x - pos.x, 2) + 
+                Math.pow(newPosition.z - pos.z, 2)
+            );
+            
+            if (distance < minDistanceFound) {
+                minDistanceFound = distance;
+            }
+        }
         
         attempts++;
-    } while (distance < minDistance && attempts < maxAttempts);
+    } while (minDistanceFound < minDistance && attempts < maxAttempts);
     
-    console.log(`Generated new safe position at distance ${distance.toFixed(2)} after ${attempts} attempts`);
-    console.log(`Original position: (${position.x.toFixed(2)}, ${position.z.toFixed(2)}), New position: (${newPosition.x.toFixed(2)}, ${newPosition.z.toFixed(2)})`);
+    console.log(`Generated new safe position at distance ${minDistanceFound.toFixed(2)} after ${attempts} attempts`);
+    
+    // Log solo la prima posizione per brevità se ci sono più posizioni
+    if (positionsArray.length > 0 && positionsArray[0]) {
+        const firstPos = positionsArray[0];
+        console.log(`First original position: (${firstPos.x.toFixed(2)}, ${firstPos.z.toFixed(2)}), New position: (${newPosition.x.toFixed(2)}, ${newPosition.z.toFixed(2)})`);
+    }
     
     return newPosition;
 }
@@ -174,96 +192,92 @@ io.on('connection', (socket) => {
     });
 
     socket.on('treasureCollected', (data) => {
-        // Aggiorna il timestamp dell'ultima attività
-        socket.lastActivity = Date.now();
-        
-        console.log('Treasure collected event received:', data);
-        const playerId = data.playerId || socket.id;
-        const matchId = data.matchId;
-        const treasureType = data.treasureType || 'normal';
-        
-        // Se il giocatore è in una partita, gestisci il tesoro per quella partita
-        if (matchId && gameState.matches.has(matchId)) {
-            const match = gameState.matches.get(matchId);
-            const player = match.players.get(playerId);
+        try {
+            // Aggiorna il timestamp dell'ultima attività
+            socket.lastActivity = Date.now();
             
-            if (player) {
-                // Incrementa il punteggio del giocatore in base al tipo di tesoro
-                switch(treasureType) {
-                    case 'bonus':
-                        player.score += 2; // Il tesoro bonus vale 2 punti
-                        console.log(`Giocatore ${playerId} ha raccolto un tesoro BONUS! +2 punti`);
-                        break;
-                    case 'malus':
-                        player.score = Math.max(0, player.score - 1); // Il tesoro malus toglie 1 punto (minimo 0)
-                        console.log(`Giocatore ${playerId} ha raccolto un tesoro MALUS! -1 punto`);
-                        break;
-                    default: // 'normal'
-                        player.score += 1; // Il tesoro normale vale 1 punto
-                        console.log(`Giocatore ${playerId} ha raccolto un tesoro normale. +1 punto`);
-                        break;
+            console.log('Treasure collected event received:', data);
+            const playerId = data.playerId || socket.id;
+            const matchId = data.matchId;
+            const treasureType = data.treasureType || 'normal';
+            
+            // Se il giocatore è in una partita, gestisci il tesoro per quella partita
+            if (matchId && gameState.matches.has(matchId)) {
+                const match = gameState.matches.get(matchId);
+                const player = match.players.get(playerId);
+                
+                if (player) {
+                    // Incrementa il punteggio del giocatore in base al tipo di tesoro
+                    switch(treasureType) {
+                        case 'bonus':
+                            player.score += 2; // Il tesoro bonus vale 2 punti
+                            console.log(`Giocatore ${playerId} ha raccolto un tesoro BONUS! +2 punti`);
+                            break;
+                        case 'malus':
+                            player.score = Math.max(0, player.score - 1); // Il tesoro malus toglie 1 punto (minimo 0)
+                            console.log(`Giocatore ${playerId} ha raccolto un tesoro MALUS! -1 punto`);
+                            break;
+                        default: // 'normal'
+                            player.score += 1; // Il tesoro normale vale 1 punto
+                            console.log(`Giocatore ${playerId} ha raccolto un tesoro normale. +1 punto`);
+                            break;
+                    }
+                    
+                    // Genera una nuova posizione per il tesoro
+                    let newPosition;
+                    try {
+                        if (data.position) {
+                            // Verifica che la posizione sia valida
+                            if (typeof data.position === 'object' && 'x' in data.position && 'z' in data.position) {
+                                // Usa la posizione inviata dal client per generare una posizione lontana
+                                newPosition = getPositionFarFrom([data.position], 30);
+                            } else {
+                                // Fallback a una posizione casuale
+                                newPosition = getRandomPosition();
+                            }
+                        } else {
+                            // Fallback a una posizione casuale
+                            newPosition = getRandomPosition();
+                        }
+                    } catch (error) {
+                        console.error('Errore nella generazione della nuova posizione del tesoro:', error);
+                        // Fallback a una posizione casuale in caso di errore
+                        newPosition = getRandomPosition();
+                    }
+                    
+                    // Genera un nuovo tipo di tesoro
+                    const newTreasureType = getRandomTreasureType();
+                    
+                    // Invia l'evento di aggiornamento del tesoro a tutti i giocatori nella partita
+                    io.to(matchId).emit('treasureUpdate', {
+                        position: newPosition,
+                        playerId: playerId,
+                        playerScore: player.score,
+                        treasureType: newTreasureType
+                    });
                 }
-                
-                // Genera una nuova posizione per il tesoro
-                let newPosition;
-                if (data.position) {
-                    // Usa la posizione inviata dal client per generare una posizione lontana
-                    newPosition = getPositionFarFrom(data.position, 30);
-                } else {
-                    // Fallback a una posizione casuale
-                    newPosition = getRandomPosition();
+            } else {
+                // Fallback al vecchio sistema
+                const player = gameState.players.get(socket.id);
+                if (player) {
+                    // Incrementa il punteggio del giocatore
+                    player.score = (player.score || 0) + 1;
+                    
+                    // Genera una nuova posizione per il tesoro
+                    gameState.treasure.position = getRandomPosition();
+                    gameState.treasure.collected++;
+                    
+                    // Invia l'evento di aggiornamento del tesoro a tutti i client
+                    io.emit('treasureUpdate', {
+                        position: gameState.treasure.position,
+                        playerId: socket.id,
+                        playerScore: player.score,
+                        treasureType: 'normal' // Il nuovo tesoro è sempre di tipo normale
+                    });
                 }
-                
-                // Aggiorna la posizione del tesoro per questa partita
-                match.treasure.position = newPosition;
-                match.treasure.collected++;
-                
-                // Invia l'aggiornamento a tutti i giocatori nella partita
-                io.to(matchId).emit('treasureUpdate', {
-                    position: match.treasure.position,
-                    playerId: playerId,
-                    playerScore: player.score,
-                    treasureType: 'normal' // Il nuovo tesoro è sempre di tipo normale
-                });
             }
-        } else {
-            // Fallback al vecchio sistema
-            const player = gameState.players.get(socket.id);
-            if (player) {
-                // Incrementa il punteggio del giocatore in base al tipo di tesoro
-                switch(treasureType) {
-                    case 'bonus':
-                        player.score += 2; // Il tesoro bonus vale 2 punti
-                        break;
-                    case 'malus':
-                        player.score = Math.max(0, player.score - 1); // Il tesoro malus toglie 1 punto (minimo 0)
-                        break;
-                    default: // 'normal'
-                        player.score += 1; // Il tesoro normale vale 1 punto
-                        break;
-                }
-                
-                // Genera una nuova posizione lontana da quella attuale
-                let newPosition;
-                if (data.position) {
-                    // Usa la posizione inviata dal client per generare una posizione lontana
-                    // Aumentiamo la distanza minima a 30 unità per garantire che il tesoro appaia all'altra parte dell'isola
-                    newPosition = getPositionFarFrom(data.position, 30);
-                } else {
-                    // Fallback a una posizione casuale se non abbiamo la posizione attuale
-                    newPosition = getRandomPosition();
-                }
-                
-                gameState.treasure.position = newPosition;
-                gameState.treasure.collected++;
-                
-                io.emit('treasureUpdate', {
-                    position: gameState.treasure.position,
-                    playerId: socket.id,
-                    playerScore: player.score,
-                    treasureType: 'normal' // Il nuovo tesoro è sempre di tipo normale
-                });
-            }
+        } catch (error) {
+            console.error('Error in treasureCollected:', error);
         }
     });
 
@@ -392,11 +406,32 @@ function startMatch() {
     // Genera posizioni casuali per i tesori
     const treasurePositions = [];
     for (let i = 0; i < 5; i++) {
-        const position = getPositionFarFrom(Object.values(playerPositions), 20);
-        treasurePositions.push({
-            position,
-            type: getRandomTreasureType()
-        });
+        try {
+            // Converti le posizioni dei giocatori in un array di oggetti validi
+            const validPlayerPositions = Object.values(playerPositions).filter(pos => 
+                pos && typeof pos === 'object' && 'x' in pos && 'z' in pos
+            );
+            
+            // Se non ci sono posizioni valide, usa una posizione casuale
+            let position;
+            if (validPlayerPositions.length > 0) {
+                position = getPositionFarFrom(validPlayerPositions, 20);
+            } else {
+                position = getRandomPosition();
+            }
+            
+            treasurePositions.push({
+                position,
+                type: getRandomTreasureType()
+            });
+        } catch (error) {
+            console.error(`Errore nella generazione della posizione del tesoro ${i}:`, error);
+            // Fallback a una posizione casuale in caso di errore
+            treasurePositions.push({
+                position: getRandomPosition(),
+                type: getRandomTreasureType()
+            });
+        }
     }
     
     // Invia l'evento di inizio partita a tutti i giocatori
