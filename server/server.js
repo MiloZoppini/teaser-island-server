@@ -420,6 +420,70 @@ function broadcastLobbyUpdate() {
 }
 
 /**
+ * Simula il movimento dei bot in una partita
+ * @param {string} matchId - ID della partita
+ */
+function simulateBotMovement(matchId) {
+    const match = gameState.matches.get(matchId);
+    if (!match) return;
+
+    // Simula il movimento solo per i bot
+    for (const [playerId, playerData] of match.players.entries()) {
+        // Salta i giocatori che non sono bot
+        if (!playerData.isBot) continue;
+        
+        // Genera un movimento casuale
+        const currentPosition = playerData.position || { x: 0, y: 1, z: 0 };
+        const speed = 0.1; // Velocità del movimento
+        const direction = Math.random() * Math.PI * 2; // Direzione casuale in radianti
+        
+        // Calcola la nuova posizione
+        let newPosition = {
+            x: currentPosition.x + Math.cos(direction) * speed,
+            y: currentPosition.y, // Mantiene l'altezza costante
+            z: currentPosition.z + Math.sin(direction) * speed
+        };
+        
+        // Verifica che la nuova posizione sia all'interno dell'isola
+        const distanceFromCenter = Math.sqrt(newPosition.x * newPosition.x + newPosition.z * newPosition.z);
+        if (distanceFromCenter > 80) { // Se il bot sta per uscire dall'isola
+            // Genera una nuova posizione verso il centro dell'isola
+            const angleToCenter = Math.atan2(-newPosition.z, -newPosition.x);
+            newPosition = {
+                x: currentPosition.x + Math.cos(angleToCenter) * speed,
+                y: currentPosition.y,
+                z: currentPosition.z + Math.sin(angleToCenter) * speed
+            };
+        }
+        
+        // Calcola la rotazione in base alla direzione del movimento
+        const currentRotation = playerData.rotation || { x: 0, y: 0, z: 0 };
+        const targetRotation = {
+            x: currentRotation.x,
+            y: Math.atan2(
+                newPosition.x - currentPosition.x,
+                newPosition.z - currentPosition.z
+            ),
+            z: currentRotation.z
+        };
+        
+        // Aggiorna la posizione e la rotazione del bot
+        playerData.position = newPosition;
+        playerData.rotation = targetRotation;
+
+        // Invia l'aggiornamento di movimento a tutti i giocatori nella partita
+        io.to(matchId).emit('playerMoved', {
+            id: playerId,
+            position: newPosition,
+            rotation: targetRotation
+        });
+    }
+
+    // Ripeti la simulazione ogni 100ms
+    setTimeout(() => simulateBotMovement(matchId), 100);
+}
+
+/**
  * Avvia una nuova partita con i giocatori in attesa
  */
 function startMatch() {
@@ -451,10 +515,33 @@ function startMatch() {
             nickname: playerData.nickname || `player-${playerId.slice(0, 5)}`, // Usa il nickname dalla lobby o genera uno
             score: 0, // Inizializza il punteggio
             position: { x: 0, y: 0, z: 0 }, // Posizione iniziale
-            rotation: { x: 0, y: 0, z: 0 } // Rotazione iniziale
+            rotation: { x: 0, y: 0, z: 0 }, // Rotazione iniziale
+            isBot: false // Per default, i giocatori non sono bot
         });
         gameState.lobby.players.delete(playerId);
         i++;
+    }
+    
+    // Se ci sono meno giocatori del minimo richiesto, aggiungi bot
+    if (matchPlayers.size < gameState.lobby.minPlayers) {
+        const botsNeeded = gameState.lobby.minPlayers - matchPlayers.size;
+        console.log(`Aggiungendo ${botsNeeded} bot alla partita ${matchId}`);
+        
+        for (let j = 0; j < botsNeeded; j++) {
+            const botId = `bot-${Date.now()}-${j}`;
+            const botNickname = `Bot-${Math.random().toString(36).slice(2, 6)}`;
+            
+            matchPlayers.set(botId, {
+                joinTime: Date.now(),
+                nickname: botNickname,
+                score: 0,
+                position: { x: 0, y: 0, z: 0 },
+                rotation: { x: 0, y: 0, z: 0 },
+                isBot: true // Questo è un bot
+            });
+            
+            console.log(`Bot ${botNickname} (${botId}) aggiunto alla partita`);
+        }
     }
     
     // Aggiungi la partita alla mappa delle partite
@@ -471,6 +558,12 @@ function startMatch() {
     const playerPositions = {};
     for (const playerId of matchPlayers.keys()) {
         playerPositions[playerId] = getRandomPosition();
+        
+        // Aggiorna la posizione nel giocatore
+        const player = matchPlayers.get(playerId);
+        if (player) {
+            player.position = playerPositions[playerId];
+        }
     }
     
     // Genera posizioni casuali per i tesori
@@ -564,6 +657,9 @@ function startMatch() {
             endMatch(matchId, 'Tempo scaduto');
         }
     }, gameState.matchTimeout);
+    
+    // Avvia la simulazione del movimento dei bot per questa partita
+    simulateBotMovement(matchId);
     
     // Aggiorna il contatore dei giocatori online
     broadcastOnlinePlayersCount();
