@@ -394,6 +394,13 @@ class Player {
         // Aggiungiamo un listener per il tasto Escape per sbloccare il puntatore
         document.addEventListener('pointerlockchange', () => {
             this.pointerLocked = document.pointerLockElement === document.body;
+            
+            // Aggiungi o rimuovi l'evento mousemove in base allo stato del puntatore
+            if (this.pointerLocked) {
+                document.addEventListener('mousemove', this.onMouseMove.bind(this));
+            } else {
+                document.removeEventListener('mousemove', this.onMouseMove.bind(this));
+            }
         });
     }
 
@@ -408,7 +415,16 @@ class Player {
 
         document.addEventListener('keydown', (e) => this.onKeyDown(e));
         document.addEventListener('keyup', (e) => this.onKeyUp(e));
-        document.addEventListener('mousemove', (e) => this.onMouseMove(e));
+        
+        // Aggiungiamo un listener per il click sul canvas per bloccare il puntatore
+        const canvas = document.querySelector('canvas');
+        if (canvas) {
+            canvas.addEventListener('click', () => {
+                if (!this.pointerLocked) {
+                    this.lockPointer();
+                }
+            });
+        }
     }
 
     onKeyDown(event) {
@@ -466,26 +482,23 @@ class Player {
     }
 
     onMouseMove(event) {
-        if (!this.isLocalPlayer) return;
+        if (!this.isLocalPlayer || !this.pointerLocked) return;
         
-        // Applica la rotazione solo se il puntatore è bloccato
-        if (document.pointerLockElement === document.body) {
-            // Sensibilità del mouse (più basso = più sensibile)
-            const sensitivity = 0.002;
-            
-            // Calcola la rotazione orizzontale (sinistra/destra)
-            this.model.rotation.y -= event.movementX * sensitivity;
-            
-            // Calcola la rotazione verticale (su/giù)
-            this.verticalAngle -= event.movementY * sensitivity;
-            
-            // Limita la rotazione verticale per evitare che la camera si capovolga
-            const maxVerticalAngle = Math.PI / 3; // 60 gradi
-            this.verticalAngle = Math.max(-maxVerticalAngle, Math.min(maxVerticalAngle, this.verticalAngle));
-            
-            // Applica la rotazione verticale alla camera
-            this.camera.rotation.x = this.verticalAngle;
-        }
+        // Sensibilità del mouse (più basso = più sensibile)
+        const sensitivity = 0.002;
+        
+        // Calcola la rotazione orizzontale (sinistra/destra)
+        this.model.rotation.y -= event.movementX * sensitivity;
+        
+        // Calcola la rotazione verticale (su/giù)
+        this.verticalAngle -= event.movementY * sensitivity;
+        
+        // Limita la rotazione verticale per evitare che la camera si capovolga
+        const maxVerticalAngle = Math.PI / 3; // 60 gradi
+        this.verticalAngle = Math.max(-maxVerticalAngle, Math.min(maxVerticalAngle, this.verticalAngle));
+        
+        // Applica la rotazione verticale alla camera
+        this.camera.rotation.x = this.verticalAngle;
     }
 
     jump() {
@@ -578,6 +591,11 @@ class Player {
                 this.nameTag.lookAt(window.game.camera.position);
             }
         }
+        
+        // Aggiorna l'indicatore di corsa
+        if (this.isLocalPlayer && this.runningIndicator) {
+            this.runningIndicator.style.display = this.isRunning ? 'block' : 'none';
+        }
     }
 
     updateMovement() {
@@ -586,15 +604,11 @@ class Player {
         // Calcola la velocità di movimento in base allo stato di corsa
         const moveSpeed = this.isRunning ? this.runSpeed : this.moveSpeed;
         
-        // Direzione di movimento basata sulla rotazione del modello
-        const angle = this.model.rotation.y;
-        
         // Resetta la velocità orizzontale
         let moveX = 0;
         let moveZ = 0;
         
         // Calcola la direzione di movimento in base ai tasti premuti
-        // In Minecraft, i movimenti sono relativi alla direzione della camera
         if (this.keys.forward) {
             moveZ -= 1;
         }
@@ -612,7 +626,6 @@ class Player {
         }
         
         // Normalizza il vettore di movimento se ci si muove in diagonale
-        // per evitare velocità maggiori in diagonale
         if (moveX !== 0 && moveZ !== 0) {
             const length = Math.sqrt(moveX * moveX + moveZ * moveZ);
             moveX /= length;
@@ -620,6 +633,7 @@ class Player {
         }
         
         // Applica la rotazione del giocatore al vettore di movimento
+        const angle = this.model.rotation.y;
         const rotatedMoveX = moveX * Math.cos(angle) - moveZ * Math.sin(angle);
         const rotatedMoveZ = moveX * Math.sin(angle) + moveZ * Math.cos(angle);
         
@@ -680,45 +694,18 @@ class Player {
     updateCamera() {
         if (!this.isLocalPlayer || !this.camera) return;
         
-        // Calcola l'intensità del movimento basata sulla velocità
-        const speed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
-        const isMoving = speed > 0.01;
+        // Mantieni un offset fisso dietro il giocatore
+        const offset = new THREE.Vector3(0, 5, 10);
         
-        // Effetto di oscillazione durante la camminata
-        if (isMoving) {
-            const time = Date.now() * 0.001;
-            const bobFrequency = this.isRunning ? 8 : 5; // Frequenza più alta durante la corsa
-            const bobAmplitude = this.isRunning ? 0.03 : 0.015; // Ampiezza maggiore durante la corsa
-            
-            // Oscillazione verticale (su e giù)
-            const verticalBob = Math.sin(time * bobFrequency) * bobAmplitude;
-            this.camera.position.y = 2.7 + verticalBob;
-            
-            // Oscillazione laterale (destra e sinistra)
-            const lateralBob = Math.cos(time * bobFrequency * 0.5) * bobAmplitude * 0.3;
-            this.camera.position.x = lateralBob;
-            
-            // Inclinazione della testa
-            const tiltAngle = Math.sin(time * bobFrequency * 0.5) * 0.003;
-            this.camera.rotation.z = tiltAngle;
-        } else {
-            // Ripristina la posizione della camera quando il giocatore è fermo
-            this.camera.position.y = 2.7;
-            this.camera.position.x = 0;
-            this.camera.rotation.z = 0;
-        }
+        // Posiziona la camera dietro il giocatore
+        this.camera.position.set(0, offset.y, offset.z);
         
-        // Mantieni la rotazione verticale impostata dal movimento del mouse
-        this.camera.rotation.x = this.verticalAngle;
+        // Fai guardare la camera in avanti
+        this.camera.lookAt(0, offset.y, -1);
     }
 
     setPosition(position) {
         this.model.position.copy(position);
-        
-        // Aggiorna la camera se è un giocatore locale
-        if (this.isLocalPlayer && this.camera) {
-            this.updateCamera();
-        }
     }
 
     setRotation(rotation) {
