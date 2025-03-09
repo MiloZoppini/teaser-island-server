@@ -1,7 +1,15 @@
 const express = require('express');
 const app = express();
 const http = require('http').createServer(app);
-const io = require('socket.io')(http);
+const io = require('socket.io')(http, {
+    cors: {
+        origin: "*", // Consenti connessioni da qualsiasi origine
+        methods: ["GET", "POST"]
+    },
+    pingTimeout: 60000, // Aumenta il timeout del ping a 60 secondi
+    pingInterval: 25000, // Riduce l'intervallo di ping a 25 secondi
+    transports: ['websocket', 'polling'] // Supporta sia WebSocket che polling
+});
 const path = require('path');
 
 // Serve static files
@@ -483,6 +491,9 @@ function getRandomTreasureType() {
 
 // Start server
 const PORT = process.env.PORT || 3000;
+
+// Imposta il timeout del server a 120 secondi
+http.setTimeout(120000);
 
 // Gestione degli errori del server
 const server = http.listen(PORT, '0.0.0.0', () => {
