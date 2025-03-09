@@ -137,6 +137,21 @@ function getPositionFarFrom(positions, minDistance = 30) {
     return newPosition;
 }
 
+/**
+ * Genera un nome italiano casuale
+ * @returns {string} Nome casuale
+ */
+function getRandomName() {
+    const firstNames = [
+        "Marco", "Sofia", "Luca", "Giulia", "Alessandro", "Martina", "Davide", "Chiara",
+        "Francesco", "Anna", "Matteo", "Sara", "Lorenzo", "Elena", "Simone", "Valentina",
+        "Andrea", "Laura", "Giovanni", "Francesca", "Riccardo", "Elisa", "Tommaso", "Giorgia"
+    ];
+    
+    const randomFirstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+    return randomFirstName;
+}
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
     console.log('Player connected:', socket.id);
@@ -144,20 +159,23 @@ io.on('connection', (socket) => {
     // Inizializza il timestamp dell'ultima attività
     socket.lastActivity = Date.now();
     
+    // Genera un nome casuale
+    const nickname = getRandomName();
+    
     // Aggiungi il giocatore al game state
     gameState.players.set(socket.id, {
         id: socket.id,
         position: getRandomPosition(),
         rotation: { x: 0, y: 0, z: 0 },
         score: 0,
-        nickname: `player-${Math.random().toString(36).slice(2, 11)}`
+        nickname: nickname
     });
     
     // Invia l'evento playerJoined a tutti i client
     io.emit('playerJoined', {
         id: socket.id, 
         position: gameState.players.get(socket.id).position, 
-        nickname: gameState.players.get(socket.id).nickname
+        nickname: nickname
     });
     
     // Aggiungi il giocatore alla lobby per il matchmaking
@@ -262,7 +280,12 @@ io.on('connection', (socket) => {
     // Gestione degli eventi del socket
     socket.on('requestMatchmaking', (data) => {
         const playerId = data.playerId || socket.id;
-        const nickname = data.nickname || gameState.players.get(socket.id)?.nickname || `player-${Math.random().toString(36).slice(2, 11)}`;
+        
+        // Usa il nickname fornito dal client, o quello memorizzato nel gameState, o quello nel socket
+        const nickname = data.nickname || 
+                        gameState.players.get(socket.id)?.nickname || 
+                        socket.nickname || 
+                        getRandomName();
         
         // Aggiorna il timestamp dell'ultima attività
         socket.lastActivity = Date.now();
@@ -286,10 +309,11 @@ io.on('connection', (socket) => {
  * @param {string} playerId - ID del giocatore
  */
 function handleMatchmaking(socket, playerId) {
-    // Usa il nickname memorizzato nel socket o genera un nickname casuale
-    const nickname = socket.nickname || 
-                    (gameState.players.get(playerId)?.nickname) || 
-                    `player-${Math.random().toString(36).slice(2, 11)}`;
+    // Usa il nickname già generato e memorizzato nel gameState
+    const nickname = gameState.players.get(playerId)?.nickname || getRandomName();
+    
+    // Salva il nickname nel socket per riferimento futuro
+    socket.nickname = nickname;
     
     // Aggiungi il giocatore alla lobby
     gameState.lobby.players.set(playerId, {
