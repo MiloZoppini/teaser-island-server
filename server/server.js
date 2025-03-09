@@ -435,17 +435,43 @@ function startMatch() {
     }
     
     // Invia l'evento di inizio partita a tutti i giocatori
-    for (const [playerId, socket] of matchPlayers.entries()) {
-        // Imposta il matchId nel socket
-        socket.matchId = matchId;
-        
-        // Invia l'evento di inizio partita
-        socket.emit('matchStart', {
-            matchId,
-            players: Array.from(matchPlayers.keys()),
-            positions: playerPositions,
-            treasures: treasurePositions
-        });
+    for (const [playerId, playerData] of matchPlayers.entries()) {
+        try {
+            // Verifica che playerData.socket sia un oggetto socket valido
+            if (playerData && playerData.socket && typeof playerData.socket.emit === 'function') {
+                // Imposta il matchId nel socket
+                playerData.socket.matchId = matchId;
+                
+                // Invia l'evento di inizio partita
+                playerData.socket.emit('matchStart', {
+                    matchId,
+                    players: Array.from(matchPlayers.keys()),
+                    positions: playerPositions,
+                    treasures: treasurePositions
+                });
+                
+                console.log(`Evento matchStart inviato al giocatore ${playerId}`);
+            } else {
+                console.error(`Socket non valido per il giocatore ${playerId}`);
+                
+                // Tenta di recuperare il socket dalla mappa dei socket connessi
+                const socket = io.sockets.sockets.get(playerId);
+                if (socket && typeof socket.emit === 'function') {
+                    socket.matchId = matchId;
+                    socket.emit('matchStart', {
+                        matchId,
+                        players: Array.from(matchPlayers.keys()),
+                        positions: playerPositions,
+                        treasures: treasurePositions
+                    });
+                    console.log(`Evento matchStart inviato al giocatore ${playerId} (recuperato)`);
+                } else {
+                    console.error(`Impossibile recuperare il socket per il giocatore ${playerId}`);
+                }
+            }
+        } catch (error) {
+            console.error(`Errore nell'invio dell'evento matchStart al giocatore ${playerId}:`, error);
+        }
     }
     
     // Imposta un timer per terminare la partita dopo 5 minuti

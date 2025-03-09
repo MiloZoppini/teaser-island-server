@@ -128,9 +128,9 @@ class GameSocket {
             if (this.onTreasureCollected) this.onTreasureCollected(data.playerId, data.position, data.playerScore, data.treasureType);
         });
         
-        this.socket.on('gameOver', (winnerId) => {
-            console.log('Game over. Winner:', winnerId);
-            if (this.onGameOver) this.onGameOver(winnerId);
+        this.socket.on('gameOver', (data) => {
+            console.log('Game over. Winner:', data.winnerId);
+            if (this.onGameOver) this.onGameOver(data.winnerId, data.scores, data.reason);
         });
         
         // Nuovi eventi per il sistema di lobby e matchmaking
@@ -139,17 +139,49 @@ class GameSocket {
             if (this.onLobbyUpdate) this.onLobbyUpdate(data.playersInLobby, data.maxPlayers);
         });
         
-        this.socket.on('matchFound', (data) => {
-            console.log('Match found:', data);
+        this.socket.on('matchStart', (data) => {
+            console.log('Match start received:', data);
             this.matchId = data.matchId;
-            if (this.onMatchFound) this.onMatchFound(data.matchId, data.players, data.position);
+            
+            // Verifica che i dati siano validi
+            if (!data.positions || !data.players) {
+                console.error('Dati di matchStart non validi:', data);
+                return;
+            }
+            
+            // Trova la posizione del giocatore locale
+            const myPosition = data.positions[this.playerId];
+            if (!myPosition) {
+                console.error('Posizione del giocatore locale non trovata nei dati di matchStart');
+                return;
+            }
+            
+            // Crea un array di oggetti giocatore con id, position e nickname
+            const players = data.players.map(playerId => {
+                return {
+                    id: playerId,
+                    position: data.positions[playerId],
+                    nickname: playerId === this.playerId ? this.playerNickname : `Player-${playerId.substring(0, 5)}`
+                };
+            });
+            
+            if (this.onMatchFound) {
+                this.onMatchFound(data.matchId, players, myPosition);
+            }
         });
         
         // Evento per aggiornare il contatore dei giocatori online
         this.socket.on('onlinePlayersUpdate', (count) => {
             console.log('Online players update:', count);
-            document.getElementById('online-players-count').textContent = count;
-            document.getElementById('online-players-count-hud').textContent = count;
+            const onlinePlayersCount = document.getElementById('online-players-count');
+            if (onlinePlayersCount) {
+                onlinePlayersCount.textContent = count;
+            }
+            
+            const onlinePlayersCountHud = document.getElementById('online-players-count-hud');
+            if (onlinePlayersCountHud) {
+                onlinePlayersCountHud.textContent = count;
+            }
         });
     }
 
