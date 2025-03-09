@@ -143,6 +143,30 @@ class Player {
             metalness: 0.1
         });
         
+        // Se è il giocatore locale, non creiamo il modello visibile
+        // ma solo un contenitore per la camera
+        if (this.isLocalPlayer) {
+            // Non aggiungiamo parti visibili al modello
+            // Aggiungiamo solo un collider invisibile
+            this.addCollider();
+            
+            // Configura la camera
+            this.setupCamera();
+            this.setupControls();
+            this.createRunningIndicator();
+            
+            // Aggiungi il modello alla scena
+            this.scene.add(this.model);
+            
+            // Imposta la posizione
+            this.setPosition(this.initialPosition);
+            
+            this.loaded = true;
+            return;
+        }
+        
+        // Per i giocatori remoti, creiamo il modello completo
+        
         // Testa (cubo)
         const headGeometry = new THREE.BoxGeometry(1, 1, 1);
         this.head = new THREE.Mesh(headGeometry, headMaterial);
@@ -242,28 +266,38 @@ class Player {
         // Aggiungi il tag con il nome del giocatore
         this.addPlayerNameTag();
         
-        // Se è il giocatore locale, configura la camera
-        if (this.isLocalPlayer) {
-            this.setupCamera();
-            this.setupControls();
-            this.createRunningIndicator();
-        }
-        
         this.loaded = true;
     }
     
     addCollider() {
-        // Aggiungi un collider visibile per debug
-        const colliderGeometry = new THREE.SphereGeometry(1, 16, 16);
+        // Crea un collider per le collisioni
+        const colliderGeometry = new THREE.CylinderGeometry(0.3, 0.3, 1.8, 8);
         const colliderMaterial = new THREE.MeshBasicMaterial({
-            color: this.playerColor,
+            color: 0xff0000,
             transparent: true,
-            opacity: 0.2,
+            opacity: this.isLocalPlayer ? 0 : 0.2, // Invisibile per il giocatore locale
             wireframe: true
         });
+        
         this.collider = new THREE.Mesh(colliderGeometry, colliderMaterial);
-        this.collider.position.y = 1.5; // Posiziona il collider al centro del personaggio
+        this.collider.position.y = 0.9; // Posiziona il collider al centro del corpo
         this.model.add(this.collider);
+        
+        // Aggiungi un hitbox per le collisioni con i tesori
+        // Questo è un po' più grande del collider principale
+        const hitboxGeometry = new THREE.SphereGeometry(1, 8, 8);
+        const hitboxMaterial = new THREE.MeshBasicMaterial({
+            color: 0x00ff00,
+            transparent: true,
+            opacity: this.isLocalPlayer ? 0 : 0.1, // Quasi invisibile per il giocatore locale
+            wireframe: true
+        });
+        
+        this.hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
+        this.hitbox.position.y = 1; // Posiziona l'hitbox leggermente più in alto
+        this.model.add(this.hitbox);
+        
+        console.log(`Collider aggiunto al giocatore ${this.isLocalPlayer ? 'locale' : 'remoto'}`);
     }
 
     addPlayerLight() {
@@ -361,13 +395,11 @@ class Player {
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         
         // Posiziona la camera all'altezza degli occhi del giocatore
-        this.camera.position.set(0, 2.7, 0);
+        // In Minecraft, l'altezza degli occhi è a 1.62 blocchi dal suolo
+        this.camera.position.set(0, 1.62, 0);
         
         // Aggiungi la camera al modello del giocatore
         this.model.add(this.camera);
-        
-        // Imposta la camera per guardare in avanti
-        this.camera.lookAt(0, 2.7, -1);
         
         // Inizializza la rotazione verticale a zero
         this.verticalAngle = 0;
@@ -388,18 +420,14 @@ class Player {
             this.camera.updateProjectionMatrix();
         });
         
-        // Blocca automaticamente il puntatore all'inizio
-        this.lockPointer();
+        // Aggiungiamo un pulsante per bloccare/sbloccare il puntatore
+        this.createPointerLockButton();
         
         // Aggiungiamo un listener per il tasto Escape per sbloccare il puntatore
         document.addEventListener('pointerlockchange', () => {
             this.pointerLocked = document.pointerLockElement === document.body;
-            
-            // Aggiungi o rimuovi l'evento mousemove in base allo stato del puntatore
-            if (this.pointerLocked) {
-                document.addEventListener('mousemove', this.onMouseMove.bind(this));
-            } else {
-                document.removeEventListener('mousemove', this.onMouseMove.bind(this));
+            if (this.pointerLockButton) {
+                this.pointerLockButton.textContent = this.pointerLocked ? 'Sblocca Mouse (L)' : 'Blocca Mouse (L)';
             }
         });
     }
@@ -415,16 +443,7 @@ class Player {
 
         document.addEventListener('keydown', (e) => this.onKeyDown(e));
         document.addEventListener('keyup', (e) => this.onKeyUp(e));
-        
-        // Aggiungiamo un listener per il click sul canvas per bloccare il puntatore
-        const canvas = document.querySelector('canvas');
-        if (canvas) {
-            canvas.addEventListener('click', () => {
-                if (!this.pointerLocked) {
-                    this.lockPointer();
-                }
-            });
-        }
+        document.addEventListener('mousemove', (e) => this.onMouseMove(e));
     }
 
     onKeyDown(event) {
@@ -482,23 +501,27 @@ class Player {
     }
 
     onMouseMove(event) {
-        if (!this.isLocalPlayer || !this.pointerLocked) return;
+        if (!this.isLocalPlayer) return;
         
-        // Sensibilità del mouse (più basso = più sensibile)
-        const sensitivity = 0.002;
-        
-        // Calcola la rotazione orizzontale (sinistra/destra)
-        this.model.rotation.y -= event.movementX * sensitivity;
-        
-        // Calcola la rotazione verticale (su/giù)
-        this.verticalAngle -= event.movementY * sensitivity;
-        
-        // Limita la rotazione verticale per evitare che la camera si capovolga
-        const maxVerticalAngle = Math.PI / 3; // 60 gradi
-        this.verticalAngle = Math.max(-maxVerticalAngle, Math.min(maxVerticalAngle, this.verticalAngle));
-        
-        // Applica la rotazione verticale alla camera
-        this.camera.rotation.x = this.verticalAngle;
+        // Applica la rotazione solo se il puntatore è bloccato
+        if (document.pointerLockElement === document.body) {
+            // Sensibilità del mouse (più basso = più sensibile)
+            const sensitivity = 0.002;
+            
+            // Calcola la rotazione orizzontale (sinistra/destra)
+            this.model.rotation.y -= event.movementX * sensitivity;
+            
+            // Calcola la rotazione verticale (su/giù)
+            this.verticalAngle -= event.movementY * sensitivity;
+            
+            // Limita la rotazione verticale per evitare che la camera si capovolga
+            // In Minecraft, il limite è di circa 90 gradi in entrambe le direzioni
+            const maxVerticalAngle = Math.PI / 2 * 0.99; // Leggermente meno di 90 gradi
+            this.verticalAngle = Math.max(-maxVerticalAngle, Math.min(maxVerticalAngle, this.verticalAngle));
+            
+            // Applica la rotazione verticale alla camera
+            this.camera.rotation.x = this.verticalAngle;
+        }
     }
 
     jump() {
@@ -591,11 +614,6 @@ class Player {
                 this.nameTag.lookAt(window.game.camera.position);
             }
         }
-        
-        // Aggiorna l'indicatore di corsa
-        if (this.isLocalPlayer && this.runningIndicator) {
-            this.runningIndicator.style.display = this.isRunning ? 'block' : 'none';
-        }
     }
 
     updateMovement() {
@@ -604,11 +622,15 @@ class Player {
         // Calcola la velocità di movimento in base allo stato di corsa
         const moveSpeed = this.isRunning ? this.runSpeed : this.moveSpeed;
         
+        // Direzione di movimento basata sulla rotazione del modello
+        const angle = this.model.rotation.y;
+        
         // Resetta la velocità orizzontale
         let moveX = 0;
         let moveZ = 0;
         
         // Calcola la direzione di movimento in base ai tasti premuti
+        // In Minecraft, i movimenti sono relativi alla direzione della camera
         if (this.keys.forward) {
             moveZ -= 1;
         }
@@ -626,6 +648,7 @@ class Player {
         }
         
         // Normalizza il vettore di movimento se ci si muove in diagonale
+        // per evitare velocità maggiori in diagonale
         if (moveX !== 0 && moveZ !== 0) {
             const length = Math.sqrt(moveX * moveX + moveZ * moveZ);
             moveX /= length;
@@ -633,7 +656,6 @@ class Player {
         }
         
         // Applica la rotazione del giocatore al vettore di movimento
-        const angle = this.model.rotation.y;
         const rotatedMoveX = moveX * Math.cos(angle) - moveZ * Math.sin(angle);
         const rotatedMoveZ = moveX * Math.sin(angle) + moveZ * Math.cos(angle);
         
@@ -694,18 +716,41 @@ class Player {
     updateCamera() {
         if (!this.isLocalPlayer || !this.camera) return;
         
-        // Mantieni un offset fisso dietro il giocatore
-        const offset = new THREE.Vector3(0, 5, 10);
+        // Calcola l'intensità del movimento basata sulla velocità
+        const speed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
+        const isMoving = speed > 0.01;
         
-        // Posiziona la camera dietro il giocatore
-        this.camera.position.set(0, offset.y, offset.z);
+        // Effetto di oscillazione durante la camminata (stile Minecraft)
+        if (isMoving) {
+            const time = Date.now() * 0.001;
+            const bobFrequency = this.isRunning ? 10 : 5; // Frequenza più alta durante la corsa
+            const bobAmplitude = this.isRunning ? 0.025 : 0.015; // Ampiezza maggiore durante la corsa
+            
+            // Oscillazione verticale (su e giù)
+            const verticalBob = Math.sin(time * bobFrequency) * bobAmplitude;
+            this.camera.position.y = 1.62 + verticalBob;
+            
+            // In Minecraft non c'è oscillazione laterale o inclinazione della testa
+            this.camera.position.x = 0;
+            this.camera.rotation.z = 0;
+        } else {
+            // Ripristina la posizione della camera quando il giocatore è fermo
+            this.camera.position.y = 1.62;
+            this.camera.position.x = 0;
+            this.camera.rotation.z = 0;
+        }
         
-        // Fai guardare la camera in avanti
-        this.camera.lookAt(0, offset.y, -1);
+        // Mantieni la rotazione verticale impostata dal movimento del mouse
+        this.camera.rotation.x = this.verticalAngle;
     }
 
     setPosition(position) {
         this.model.position.copy(position);
+        
+        // Aggiorna la camera se è un giocatore locale
+        if (this.isLocalPlayer && this.camera) {
+            this.updateCamera();
+        }
     }
 
     setRotation(rotation) {
@@ -785,16 +830,34 @@ class Player {
         }
     }
 
-    lockPointer() {
-        // Blocca il puntatore del mouse
-        document.body.requestPointerLock = document.body.requestPointerLock || 
-                                          document.body.mozRequestPointerLock ||
-                                          document.body.webkitRequestPointerLock;
+    createPointerLockButton() {
+        // Crea un pulsante per bloccare/sbloccare il puntatore
+        this.pointerLockButton = document.createElement('button');
+        this.pointerLockButton.className = 'pointer-lock-button';
+        this.pointerLockButton.textContent = 'Blocca Mouse (L)';
+        document.body.appendChild(this.pointerLockButton);
         
-        // Richiedi il blocco del puntatore
-        document.body.requestPointerLock();
+        // Aggiungi l'evento click
+        this.pointerLockButton.addEventListener('click', () => {
+            this.togglePointerLock();
+        });
         
-        console.log('Puntatore bloccato automaticamente');
+        // Aggiungi anche il tasto L per bloccare/sbloccare il puntatore
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'KeyL') {
+                this.togglePointerLock();
+            }
+        });
+    }
+    
+    togglePointerLock() {
+        if (document.pointerLockElement === document.body) {
+            document.exitPointerLock();
+            this.pointerLocked = false;
+        } else {
+            document.body.requestPointerLock();
+            this.pointerLocked = true;
+        }
     }
 
     dispose() {

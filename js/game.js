@@ -975,11 +975,11 @@ class Game {
         // Inizializza il timer di gioco
         this.gameTimer = setInterval(() => {
             if (this.gameStarted && this.gameTime > 0) {
-                this.gameTime--;
+            this.gameTime--;
                 this.updateGameTimer();
-                
+
                 // Termina la partita quando il tempo scade
-                if (this.gameTime <= 0) {
+            if (this.gameTime <= 0) {
                     clearInterval(this.gameTimer);
                     // Il server gestirà la fine della partita
                 }
