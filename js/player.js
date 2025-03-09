@@ -18,6 +18,8 @@ class Player {
         this.playerColor = this.isLocalPlayer ? 0x00ff00 : this.getRandomPlayerColor(); // Verde per il giocatore locale, colore casuale per gli altri
         this.playerName = this.isLocalPlayer ? "Tu" : this.getMinecraftName();
         
+        console.log(`Creazione giocatore ${this.playerName} in posizione:`, position, `isLocalPlayer: ${isLocalPlayer}`);
+        
         // Crea un gruppo temporaneo fino al caricamento del modello
         this.model = new THREE.Group();
         this.scene.add(this.model);
@@ -36,6 +38,8 @@ class Player {
             // Aggiungi un'etichetta con il nome del giocatore per i giocatori remoti
             this.addPlayerNameTag();
         }
+        
+        console.log(`Giocatore ${this.playerName} creato con successo`);
     }
 
     getRandomPlayerColor() {
@@ -224,6 +228,23 @@ class Player {
         this.setPosition(this.initialPosition);
         
         this.loaded = true;
+        
+        // Aggiungi un collider visibile per debug
+        this.addCollider();
+    }
+    
+    addCollider() {
+        // Aggiungi un collider visibile per debug
+        const colliderGeometry = new THREE.SphereGeometry(1, 16, 16);
+        const colliderMaterial = new THREE.MeshBasicMaterial({
+            color: this.playerColor,
+            transparent: true,
+            opacity: 0.2,
+            wireframe: true
+        });
+        this.collider = new THREE.Mesh(colliderGeometry, colliderMaterial);
+        this.collider.position.y = 1.5; // Posiziona il collider al centro del personaggio
+        this.model.add(this.collider);
     }
 
     addPlayerLight() {
@@ -273,7 +294,7 @@ class Player {
         canvas.height = 128;
         
         // Riempi lo sfondo con un colore semi-trasparente
-        context.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        context.fillStyle = 'rgba(0, 0, 0, 0.7)';
         context.fillRect(0, 0, canvas.width, canvas.height);
         
         // Aggiungi un bordo
@@ -282,7 +303,7 @@ class Player {
         context.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
         
         // Imposta lo stile del testo
-        context.font = 'Bold 48px Minecraft, Arial';
+        context.font = 'Bold 48px Arial';
         context.fillStyle = '#ffffff'; // Testo bianco
         context.textAlign = 'center';
         context.textBaseline = 'middle';
@@ -317,8 +338,24 @@ class Player {
     }
 
     setupCamera() {
+        // Crea una camera in prima persona
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        this.updateCamera();
+        
+        // Posiziona la camera sopra la testa del giocatore
+        this.camera.position.set(0, 3, 0);
+        
+        // Aggiungi la camera al modello del giocatore
+        this.model.add(this.camera);
+        
+        // Imposta la camera per guardare in avanti
+        this.camera.lookAt(0, 3, -10);
+        
+        // Salva la camera in window.game per debug
+        if (window.game) {
+            window.game.camera = this.camera;
+        }
+        
+        console.log('Camera setup completato per il giocatore locale');
         
         // Blocchiamo il puntatore per una migliore esperienza in prima persona
         document.addEventListener('click', () => {
@@ -397,7 +434,7 @@ class Player {
     }
 
     onMouseMove(event) {
-        if (this.isLocalPlayer) {
+        if (this.isLocalPlayer && document.pointerLockElement === document.body) {
             // Rotazione orizzontale
             this.model.rotation.y -= event.movementX * 0.002;
             
@@ -405,6 +442,11 @@ class Player {
             this.verticalAngle = this.verticalAngle || 0;
             this.verticalAngle -= event.movementY * 0.002;
             this.verticalAngle = Math.max(-Math.PI/3, Math.min(Math.PI/3, this.verticalAngle));
+            
+            // Applica la rotazione verticale alla camera
+            if (this.camera) {
+                this.camera.rotation.x = this.verticalAngle;
+            }
         }
     }
 
@@ -478,102 +520,79 @@ class Player {
     }
 
     updateMovement() {
-        const direction = new THREE.Vector3();
+        if (!this.isLocalPlayer) return;
         
+        const moveSpeed = this.isRunning ? this.runSpeed : this.moveSpeed;
+        const direction = new THREE.Vector3(0, 0, 0);
+        
+        // Calcola la direzione in base ai tasti premuti
         if (this.keys.forward) direction.z -= 1;
         if (this.keys.backward) direction.z += 1;
         if (this.keys.left) direction.x -= 1;
         if (this.keys.right) direction.x += 1;
-
-        direction.normalize();
-        direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.model.rotation.y);
         
-        // Usa la velocità di corsa se il giocatore sta correndo, altrimenti usa la velocità normale
-        const currentSpeed = this.isRunning && this.keys.forward ? this.runSpeed : this.moveSpeed;
+        // Normalizza la direzione per evitare velocità maggiore in diagonale
+        if (direction.length() > 0) {
+            direction.normalize();
+        }
         
-        this.velocity.x = direction.x * currentSpeed;
-        this.velocity.z = direction.z * currentSpeed;
+        // Calcola il movimento in base alla rotazione del giocatore
+        const angle = this.model.rotation.y;
+        this.velocity.x = direction.x * Math.cos(angle) + direction.z * Math.sin(angle);
+        this.velocity.z = direction.z * Math.cos(angle) - direction.x * Math.sin(angle);
+        
+        // Applica la velocità
+        this.velocity.x *= moveSpeed;
+        this.velocity.z *= moveSpeed;
     }
 
     updatePhysics() {
-        // Applica gravità
+        if (!window.game) return;
+        
+        // Applica la gravità
         if (!this.onGround) {
             this.velocity.y -= this.gravity;
         }
-
-        // Salva la posizione attuale per poter tornare indietro in caso di collisione
-        const oldPosition = this.model.position.clone();
-
-        // Aggiorna posizione
+        
+        // Aggiorna la posizione
         this.model.position.x += this.velocity.x;
         this.model.position.y += this.velocity.y;
         this.model.position.z += this.velocity.z;
-
+        
         // Collisione con il terreno
-        if (this.model.position.y <= 1) {
-            this.model.position.y = 1;
+        const terrainHeight = window.game.getTerrainHeight(this.model.position.x, this.model.position.z);
+        if (this.model.position.y < terrainHeight + 1) {
+            this.model.position.y = terrainHeight + 1;
             this.velocity.y = 0;
             this.onGround = true;
+        } else {
+            this.onGround = false;
         }
-
-        // Verifica collisioni con gli oggetti nella scena
-        if (window.game && window.game.checkCollisions) {
-            const playerPosition = new THREE.Vector3(
-                this.model.position.x,
-                this.model.position.y,
-                this.model.position.z
-            );
-            
-            // Raggio di collisione del giocatore
-            const collisionRadius = 1.0;
-            
-            // Se c'è una collisione, torna alla posizione precedente
-            if (window.game.checkCollisions(playerPosition, collisionRadius)) {
-                this.model.position.copy(oldPosition);
-                // Azzera la velocità nella direzione della collisione
-                this.velocity.x = 0;
-                this.velocity.z = 0;
-            }
-        }
-
-        // Limita l'area di gioco (quadruplicata)
-        const maxRadius = 100; // Aumentato da 25 a 100
-        const position = new THREE.Vector2(this.model.position.x, this.model.position.z);
-        if (position.length() > maxRadius) {
-            position.normalize().multiplyScalar(maxRadius);
-            this.model.position.x = position.x;
-            this.model.position.z = position.y;
+        
+        // Attrito (rallentamento orizzontale)
+        this.velocity.x *= 0.9;
+        this.velocity.z *= 0.9;
+        
+        // Limita la velocità massima
+        const maxSpeed = this.isRunning ? this.runSpeed * 1.5 : this.moveSpeed * 1.5;
+        const horizontalSpeed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
+        if (horizontalSpeed > maxSpeed) {
+            const scale = maxSpeed / horizontalSpeed;
+            this.velocity.x *= scale;
+            this.velocity.z *= scale;
         }
     }
 
     updateCamera() {
-        if (!this.camera) return;
-
-        // Visuale in prima persona
-        const headPosition = new THREE.Vector3().copy(this.model.position);
-        headPosition.y += 3.0; // Aumentata da 1.7 a 3.0 per una visuale più alta
-        
-        this.camera.position.copy(headPosition);
-        
-        // Creiamo un punto di mira che tiene conto della rotazione verticale
-        const lookAtPoint = new THREE.Vector3(
-            headPosition.x - Math.sin(this.model.rotation.y) * 10,
-            headPosition.y + (this.verticalAngle || 0) * 10, // Aggiungiamo la rotazione verticale
-            headPosition.z - Math.cos(this.model.rotation.y) * 10
-        );
-        
-        this.camera.lookAt(lookAtPoint);
-        
-        // Nascondiamo il modello del giocatore in prima persona
-        this.model.visible = false;
+        // Nessuna azione necessaria poiché la camera è già collegata al modello
     }
 
     setPosition(position) {
-        this.model.position.set(position.x, position.y, position.z);
+        this.model.position.copy(position);
     }
 
     setRotation(rotation) {
-        this.model.rotation.set(rotation.x, rotation.y, rotation.z);
+        this.model.rotation.copy(rotation);
     }
 
     getPosition() {
@@ -585,24 +604,19 @@ class Player {
     }
 
     createRunningIndicator() {
-        // Crea un elemento per mostrare lo stato della corsa
+        // Crea un indicatore di corsa
         this.runningIndicator = document.createElement('div');
         this.runningIndicator.style.position = 'fixed';
         this.runningIndicator.style.bottom = '20px';
-        this.runningIndicator.style.left = '50%';
-        this.runningIndicator.style.transform = 'translateX(-50%)';
-        this.runningIndicator.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-        this.runningIndicator.style.color = '#ffcc00';
-        this.runningIndicator.style.padding = '8px 15px';
+        this.runningIndicator.style.right = '20px';
+        this.runningIndicator.style.padding = '10px 15px';
+        this.runningIndicator.style.background = 'rgba(0, 255, 0, 0.5)';
+        this.runningIndicator.style.color = 'white';
         this.runningIndicator.style.borderRadius = '5px';
         this.runningIndicator.style.fontFamily = 'Arial, sans-serif';
         this.runningIndicator.style.fontSize = '16px';
-        this.runningIndicator.style.fontWeight = 'bold';
         this.runningIndicator.style.display = 'none';
-        this.runningIndicator.style.zIndex = '1000';
-        this.runningIndicator.style.boxShadow = '0 0 10px rgba(255, 204, 0, 0.5)';
-        this.runningIndicator.style.border = '1px solid #ffcc00';
-        this.runningIndicator.textContent = '🏃 CORSA ATTIVA 🏃';
+        this.runningIndicator.textContent = 'Corsa';
         document.body.appendChild(this.runningIndicator);
     }
 

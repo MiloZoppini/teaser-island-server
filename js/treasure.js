@@ -10,10 +10,15 @@ class Treasure {
         this.loaded = false;
         this.type = type; // 'normal', 'bonus', 'malus'
         
+        console.log(`Creazione tesoro di tipo ${type} in posizione:`, position);
+        
         // Aggiungiamo un collider visibile per debug
         this.addCollider();
         
-        // Carica il modello GLTF
+        // Crea immediatamente un modello di fallback per garantire la visibilità
+        this.createFallbackModel();
+        
+        // Carica il modello GLTF (sostituirà il fallback se caricato con successo)
         this.loadModel();
     }
 
@@ -48,28 +53,33 @@ class Treasure {
                         child.originalMaterial = child.material;
                         
                         // Crea un nuovo materiale con proprietà emissive
-                        // Colore in base al tipo di tesoro
-                        let color, emissive;
-                        switch (this.type) {
+                        let color, emissiveColor, emissiveIntensity;
+                        
+                        // Imposta colori diversi in base al tipo di tesoro
+                        switch(this.type) {
                             case 'bonus':
-                                color = 0x0088FF; // Blu
-                                emissive = 0x0044AA;
+                                color = 0x0088ff; // Blu
+                                emissiveColor = 0x0088ff;
+                                emissiveIntensity = 0.8;
                                 break;
                             case 'malus':
-                                color = 0xFF0000; // Rosso
-                                emissive = 0xAA0000;
+                                color = 0xff0000; // Rosso
+                                emissiveColor = 0xff0000;
+                                emissiveIntensity = 0.8;
                                 break;
-                            default: // normal
-                                color = 0xD4AF37; // Oro
-                                emissive = 0xFFD700;
+                            default: // 'normal'
+                                color = 0xffcc00; // Oro
+                                emissiveColor = 0xffcc00;
+                                emissiveIntensity = 0.5;
+                                break;
                         }
                         
                         child.material = new THREE.MeshStandardMaterial({
                             color: color,
                             roughness: 0.3,
                             metalness: 0.8,
-                            emissive: emissive,
-                            emissiveIntensity: 0.3
+                            emissive: emissiveColor,
+                            emissiveIntensity: emissiveIntensity
                         });
                         
                         // Abilita ombre
@@ -84,11 +94,18 @@ class Treasure {
                 // Imposta la posizione
                 this.setPosition(this.initialPosition);
                 
-                // Aggiungi luce e effetti
+                // Aggiungi dettagli al forziere
+                this.addChestDetails();
+                
+                // Aggiungi una luce al tesoro
                 this.addLight();
+                
+                // Aggiungi particelle
                 this.createParticles();
                 
                 this.loaded = true;
+                
+                console.log(`Modello GLTF del tesoro di tipo ${this.type} caricato con successo`);
             },
             (xhr) => {
                 console.log((xhr.loaded / xhr.total * 100) + '% caricato');
@@ -96,65 +113,84 @@ class Treasure {
             (error) => {
                 console.error('Errore nel caricamento del modello:', error);
                 
-                // In caso di errore, crea un modello di fallback
-                this.createFallbackModel();
+                // In caso di errore, il modello di fallback è già stato creato
+                console.log('Utilizzo del modello di fallback per il tesoro');
             }
         );
     }
-    
+
     createFallbackModel() {
         // Crea un modello di fallback in caso di errore nel caricamento
         console.log('Creazione modello di fallback per il tesoro');
         
-        // Gruppo principale del tesoro
-        this.model = new THREE.Group();
+        // Rimuovi il modello precedente se esiste
+        if (this.model) {
+            this.scene.remove(this.model);
+        }
         
-        // Aggiungi il flag isTreasure
+        // Crea un nuovo gruppo
+        this.model = new THREE.Group();
         this.model.userData.isTreasure = true;
         this.model.userData.treasureType = this.type;
-
-        // Colore in base al tipo di tesoro
-        let color, emissive;
-        switch (this.type) {
+        
+        // Colori diversi in base al tipo di tesoro
+        let color, emissiveColor, emissiveIntensity;
+        
+        switch(this.type) {
             case 'bonus':
-                color = 0x0088FF; // Blu
-                emissive = 0x0044AA;
+                color = 0x0088ff; // Blu
+                emissiveColor = 0x0088ff;
+                emissiveIntensity = 0.8;
                 break;
             case 'malus':
-                color = 0xFF0000; // Rosso
-                emissive = 0xAA0000;
+                color = 0xff0000; // Rosso
+                emissiveColor = 0xff0000;
+                emissiveIntensity = 0.8;
                 break;
-            default: // normal
-                color = 0xD4AF37; // Oro
-                emissive = 0xFFD700;
+            default: // 'normal'
+                color = 0xffcc00; // Oro
+                emissiveColor = 0xffcc00;
+                emissiveIntensity = 0.5;
+                break;
         }
-
-        // Crea il forziere con materiale più realistico
-        const chestGeometry = new THREE.BoxGeometry(1, 0.8, 0.6);
-        const chestMaterial = new THREE.MeshStandardMaterial({ 
+        
+        // Crea un forziere semplice con un cubo
+        const chestGeometry = new THREE.BoxGeometry(1.5, 1, 1.5);
+        const chestMaterial = new THREE.MeshStandardMaterial({
             color: color,
             roughness: 0.3,
             metalness: 0.8,
-            emissive: emissive,
-            emissiveIntensity: 0.3
+            emissive: emissiveColor,
+            emissiveIntensity: emissiveIntensity
         });
-        this.chest = new THREE.Mesh(chestGeometry, chestMaterial);
-        this.chest.castShadow = true;
-        this.chest.receiveShadow = true;
-        this.model.add(this.chest);
-
-        // Crea il coperchio
-        const lidGeometry = new THREE.BoxGeometry(1, 0.2, 0.6);
-        this.lid = new THREE.Mesh(lidGeometry, chestMaterial);
-        this.lid.position.y = 0.5;
-        this.lid.position.z = 0.3;
-        this.lid.rotation.x = -Math.PI / 6;
+        const chest = new THREE.Mesh(chestGeometry, chestMaterial);
+        chest.castShadow = true;
+        chest.receiveShadow = true;
+        this.model.add(chest);
+        
+        // Crea il coperchio del forziere
+        const lidGeometry = new THREE.BoxGeometry(1.6, 0.5, 1.6);
+        const lidMaterial = new THREE.MeshStandardMaterial({
+            color: color,
+            roughness: 0.3,
+            metalness: 0.8,
+            emissive: emissiveColor,
+            emissiveIntensity: emissiveIntensity
+        });
+        this.lid = new THREE.Mesh(lidGeometry, lidMaterial);
+        this.lid.position.y = 0.75;
         this.lid.castShadow = true;
         this.lid.receiveShadow = true;
         this.model.add(this.lid);
-
-        // Aggiungiamo dettagli al forziere
+        
+        // Aggiungi dettagli al forziere
         this.addChestDetails();
+        
+        // Aggiungi una luce al tesoro
+        this.addLight();
+        
+        // Aggiungi particelle
+        this.createParticles();
         
         // Aggiungi il modello alla scena
         this.scene.add(this.model);
@@ -162,11 +198,9 @@ class Treasure {
         // Imposta la posizione
         this.setPosition(this.initialPosition);
         
-        // Aggiungi luce e effetti
-        this.addLight();
-        this.createParticles();
-        
         this.loaded = true;
+        
+        console.log(`Modello di fallback per il tesoro di tipo ${this.type} creato con successo`);
     }
 
     addChestDetails() {
@@ -389,93 +423,42 @@ class Treasure {
     }
 
     addCollider() {
-        // Crea una sfera trasparente per visualizzare l'area di collisione
+        // Crea un collider visibile per debug
         const colliderGeometry = new THREE.SphereGeometry(5, 16, 16);
-        
-        // Colore del collider in base al tipo di tesoro
-        let colliderColor;
-        switch (this.type) {
-            case 'bonus':
-                colliderColor = 0x0088FF; // Blu
-                break;
-            case 'malus':
-                colliderColor = 0xFF0000; // Rosso
-                break;
-            default: // normal
-                colliderColor = 0xFF0000; // Rosso per il debug
-        }
-        
         const colliderMaterial = new THREE.MeshBasicMaterial({
-            color: colliderColor,
+            color: this.type === 'bonus' ? 0x0088ff : (this.type === 'malus' ? 0xff0000 : 0xffcc00),
             transparent: true,
             opacity: 0.2,
             wireframe: true
         });
         this.collider = new THREE.Mesh(colliderGeometry, colliderMaterial);
         this.model.add(this.collider);
+        
+        console.log(`Collider aggiunto al tesoro di tipo ${this.type}`);
     }
 
     checkCollision(playerPosition, collisionDistance = 5) {
-        // Verifica che il modello sia caricato
-        if (!this.model) {
-            console.log('Modello del tesoro non ancora caricato');
-            return false;
-        }
+        if (!this.model) return false;
         
-        // Verifica se il giocatore è abbastanza vicino al tesoro
         const treasurePosition = this.getPosition();
-        const dx = treasurePosition.x - playerPosition.x;
-        const dy = treasurePosition.y - playerPosition.y;
-        const dz = treasurePosition.z - playerPosition.z;
-        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const distance = playerPosition.distanceTo(treasurePosition);
         
-        // Debug: mostra sempre la distanza dal tesoro quando è vicino
+        // Debug della distanza
         if (distance < 10) {
-            console.log('Distanza dal tesoro:', distance.toFixed(2), 
-                        'Limite collisione:', collisionDistance);
-            console.log('Posizione tesoro:', 
-                        'X:', treasurePosition.x.toFixed(2), 
-                        'Y:', treasurePosition.y.toFixed(2), 
-                        'Z:', treasurePosition.z.toFixed(2));
-            console.log('Posizione giocatore:', 
-                        'X:', playerPosition.x.toFixed(2), 
-                        'Y:', playerPosition.y.toFixed(2), 
-                        'Z:', playerPosition.z.toFixed(2));
-        }
-        
-        // Utilizziamo solo la distanza, che è più affidabile delle bounding box
-        const collision = distance < collisionDistance;
-        
-        // Aggiungiamo un log più dettagliato per debug
-        if (collision) {
-            console.log('COLLISIONE CON IL TESORO RILEVATA! Distanza:', distance.toFixed(2), 
-                        'Posizione tesoro:', treasurePosition, 
-                        'Posizione giocatore:', playerPosition,
-                        'Tipo tesoro:', this.type);
+            console.log(`Distanza dal tesoro di tipo ${this.type}: ${distance.toFixed(2)}`);
             
-            // Cambia il colore del collider quando c'è una collisione
+            // Cambia il colore del collider quando il giocatore è vicino
             if (this.collider) {
-                this.collider.material.color.set(0x00ff00);
-                this.collider.material.opacity = 0.5;
+                this.collider.material.opacity = 0.4;
+                
+                if (distance < collisionDistance) {
+                    // Cambia il colore a verde quando collide
+                    this.collider.material.color.set(0x00ff00);
+                }
             }
-        } else if (this.collider && distance < 10) {
-            // Ripristina il colore del collider quando non c'è collisione ma il giocatore è vicino
-            let colliderColor;
-            switch (this.type) {
-                case 'bonus':
-                    colliderColor = 0x0088FF; // Blu
-                    break;
-                case 'malus':
-                    colliderColor = 0xFF0000; // Rosso
-                    break;
-                default: // normal
-                    colliderColor = 0xFF0000; // Rosso per il debug
-            }
-            this.collider.material.color.set(colliderColor);
-            this.collider.material.opacity = 0.2;
         }
         
-        return collision;
+        return distance < collisionDistance;
     }
 
     getType() {
