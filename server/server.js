@@ -309,11 +309,8 @@ io.on('connection', (socket) => {
  * @param {string} playerId - ID del giocatore
  */
 function handleMatchmaking(socket, playerId) {
-    // Usa il nickname già generato e memorizzato nel gameState
-    const nickname = gameState.players.get(playerId)?.nickname || getRandomName();
-    
-    // Salva il nickname nel socket per riferimento futuro
-    socket.nickname = nickname;
+    const player = gameState.players.get(playerId);
+    const nickname = player.nickname; // Usa il nome generato in precedenza
     
     // Aggiungi il giocatore alla lobby
     gameState.lobby.players.set(playerId, {
