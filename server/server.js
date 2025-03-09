@@ -8,6 +8,19 @@ const path = require('path');
 app.use(express.static(path.join(__dirname, '../public')));
 app.use('/js', express.static(path.join(__dirname, '../js')));
 
+// API endpoint per ottenere il numero di giocatori online
+app.get('/api/online-players', (req, res) => {
+    // Calcola il numero totale di giocatori online (lobby + partite attive)
+    let totalPlayers = gameState.lobby.players.size;
+    
+    // Aggiungi i giocatori nelle partite attive
+    gameState.matches.forEach(match => {
+        totalPlayers += match.players.size;
+    });
+    
+    res.json({ count: totalPlayers });
+});
+
 // Game state
 const gameState = {
     players: new Map(),
@@ -24,23 +37,35 @@ const gameState = {
     currentMatchId: 0 // Contatore per generare ID partita univoci
 };
 
-// Generate random position on island
+// Generate random position on island (safe from water)
 function getRandomPosition() {
-    // Aumentiamo significativamente il range per coprire tutta la mappa
-    const radius = 500; // Aumentato da 30 a 500
-    const angle = Math.random() * Math.PI * 2;
-    return {
-        x: Math.cos(angle) * (Math.random() * radius + 10), // Minimo 10 unità dal centro
-        y: 1,
-        z: Math.sin(angle) * (Math.random() * radius + 10) // Minimo 10 unità dal centro
+    // Parametri per generare posizioni sicure sull'isola
+    const minRadius = 20; // Minima distanza dal centro
+    const maxRadius = 80; // Massima distanza dal centro (per evitare l'acqua)
+    const angle = Math.random() * Math.PI * 2; // Angolo casuale
+    const radius = minRadius + Math.random() * (maxRadius - minRadius); // Raggio casuale tra min e max
+    
+    // Calcola la posizione in coordinate cartesiane
+    const position = {
+        x: Math.cos(angle) * radius,
+        y: 1, // Altezza fissa sopra il terreno
+        z: Math.sin(angle) * radius
     };
+    
+    // Aggiungi una piccola variazione casuale per evitare che i giocatori appaiano esattamente negli stessi punti
+    position.x += (Math.random() - 0.5) * 5;
+    position.z += (Math.random() - 0.5) * 5;
+    
+    console.log(`Generated safe position on island: (${position.x.toFixed(2)}, ${position.z.toFixed(2)})`);
+    
+    return position;
 }
 
-// Generate position far from a given point
-function getPositionFarFrom(position, minDistance = 200) {
-    // Parametri per la generazione della nuova posizione
-    const radius = 1000; // Raggio massimo della mappa
-    const minRadius = Math.max(200, Math.random() * 800); // Minimo raggio per la nuova posizione
+// Generate position far from a given point (safe from water)
+function getPositionFarFrom(position, minDistance = 30) {
+    // Parametri per generare posizioni sicure sull'isola
+    const minRadius = 20; // Minima distanza dal centro
+    const maxRadius = 80; // Massima distanza dal centro (per evitare l'acqua)
     
     let newPosition;
     let distance = 0;
@@ -49,20 +74,22 @@ function getPositionFarFrom(position, minDistance = 200) {
     
     // Genera posizioni finché non ne troviamo una abbastanza lontana o dopo maxAttempts tentativi
     do {
-        // Genera un angolo completamente casuale per coprire tutta la mappa
+        // Genera un angolo casuale
         const angle = Math.random() * Math.PI * 2;
         
-        // Genera una distanza dal centro con preferenza per le zone più lontane
-        // Usa una distribuzione esponenziale per favorire le distanze maggiori
-        const randomFactor = Math.pow(Math.random(), 0.3); // Esponente più basso favorisce valori più alti
-        const newRadius = minRadius + (radius - minRadius) * randomFactor;
+        // Genera un raggio casuale tra min e max
+        const radius = minRadius + Math.random() * (maxRadius - minRadius);
         
-        // Calcola la nuova posizione
+        // Calcola la posizione in coordinate cartesiane
         newPosition = {
-            x: Math.cos(angle) * newRadius,
-            y: 1,
-            z: Math.sin(angle) * newRadius
+            x: Math.cos(angle) * radius,
+            y: 1, // Altezza fissa sopra il terreno
+            z: Math.sin(angle) * radius
         };
+        
+        // Aggiungi una piccola variazione casuale
+        newPosition.x += (Math.random() - 0.5) * 5;
+        newPosition.z += (Math.random() - 0.5) * 5;
         
         // Calcola la distanza dalla posizione originale
         distance = Math.sqrt(
@@ -73,7 +100,7 @@ function getPositionFarFrom(position, minDistance = 200) {
         attempts++;
     } while (distance < minDistance && attempts < maxAttempts);
     
-    console.log(`Generated new position at distance ${distance.toFixed(2)} after ${attempts} attempts`);
+    console.log(`Generated new safe position at distance ${distance.toFixed(2)} after ${attempts} attempts`);
     console.log(`Original position: (${position.x.toFixed(2)}, ${position.z.toFixed(2)}), New position: (${newPosition.x.toFixed(2)}, ${newPosition.z.toFixed(2)})`);
     
     return newPosition;
@@ -363,7 +390,39 @@ const server = http.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     // Initialize treasure position
     gameState.treasure.position = getRandomPosition();
+    
+    // Avvia l'invio periodico del numero di giocatori online
+    startOnlinePlayersUpdates();
 });
+
+/**
+ * Invia periodicamente il numero di giocatori online a tutti i client
+ */
+function startOnlinePlayersUpdates() {
+    // Invia subito un primo aggiornamento
+    broadcastOnlinePlayersCount();
+    
+    // Poi invia aggiornamenti ogni 10 secondi
+    setInterval(broadcastOnlinePlayersCount, 10000);
+}
+
+/**
+ * Calcola e invia il numero di giocatori online a tutti i client
+ */
+function broadcastOnlinePlayersCount() {
+    // Calcola il numero totale di giocatori online (lobby + partite attive)
+    let totalPlayers = gameState.lobby.players.size;
+    
+    // Aggiungi i giocatori nelle partite attive
+    gameState.matches.forEach(match => {
+        totalPlayers += match.players.size;
+    });
+    
+    console.log(`Broadcasting online players count: ${totalPlayers}`);
+    
+    // Invia l'aggiornamento a tutti i client connessi
+    io.emit('onlinePlayersUpdate', totalPlayers);
+}
 
 // Gestione degli errori
 server.on('error', (error) => {
