@@ -13,6 +13,8 @@ class Game {
         this.gameStarted = false; // Flag per indicare se la partita è iniziata
         this.treasuresCollected = 0; // Contatore dei tesori raccolti
         this.treasures = []; // Array di tesori attivi
+        this.gameTime = 300; // Tempo di gioco in secondi (5 minuti)
+        this.gameTimer = null; // Timer per il countdown
         
         // Elementi UI
         this.lobbyScreen = document.getElementById('lobby-screen');
@@ -20,6 +22,9 @@ class Game {
         this.maxPlayers = document.getElementById('max-players');
         this.lobbyProgress = document.getElementById('lobby-progress');
         this.lobbyStatus = document.getElementById('lobby-status');
+        
+        // Crea l'HUD del gioco
+        this.createGameHUD();
         
         this.setupScene();
         this.setupLights();
@@ -776,64 +781,57 @@ class Game {
             }
         };
 
-        this.gameSocket.onTreasureCollected = (id, position, score, treasureType) => {
-            // Se siamo ancora in lobby, ignoriamo gli eventi di raccolta tesori
-            if (this.inLobby && !this.gameStarted) return;
+        this.gameSocket.onTreasureCollected = (playerId, position, type) => {
+            console.log(`Tesoro di tipo ${type} raccolto da ${playerId} in posizione:`, position);
             
-            console.log(`Treasure collected by player ${id}, type: ${treasureType}`);
+            // Trova il giocatore che ha raccolto il tesoro
+            const player = this.players.get(playerId);
             
-            // Aggiorna il punteggio del giocatore
-            const player = this.players.get(id);
             if (player) {
-                // Aggiorna il punteggio solo se fornito dal server
-                if (score !== undefined) {
-                    player.score = score;
+                // Calcola i punti in base al tipo di tesoro
+                let points = 1; // Valore predefinito per tesori normali
+                
+                switch(type) {
+                    case 'blue': points = 2; break;
+                    case 'red': points = -1; break;
+                    case 'normal': default: points = 1; break;
                 }
                 
+                // Aggiorna il punteggio del giocatore
+                player.score = (player.score || 0) + points;
+                
+                // Se è il giocatore locale, mostra un messaggio
                 if (player.isLocalPlayer) {
-                    document.getElementById('score').textContent = `Tesori: ${player.score}`;
+                    this.showTreasureMessage(type, points);
                     
-                    // Incrementa il contatore dei tesori raccolti
-                    this.treasuresCollected++;
-                    
-                    // Mostra un messaggio temporaneo con il tipo di tesoro raccolto
-                    this.showTreasureMessage(treasureType);
+                    // Aggiorna il punteggio nell'HUD
+                    const scoreSpan = this.scoreElement.querySelector('span');
+                    if (scoreSpan) {
+                        scoreSpan.textContent = player.score;
+                    }
                 }
-            }
-
-            // Rimuovi tutti i tesori esistenti
-            this.treasures.forEach(treasure => {
-                if (treasure) {
-                    treasure.dispose();
-                }
-            });
-            this.treasures = [];
-            
-            // Cerca e rimuovi eventuali altri tesori nella scena
-            this.scene.traverse(object => {
-                if (object.userData && object.userData.isTreasure) {
-                    this.scene.remove(object);
-                }
-            });
-
-            // Crea nuovi tesori
-            if (position) {
-                // Crea sempre un tesoro normale nella posizione specificata
-                this.createTreasure(position, 'normal');
                 
-                // Dopo 3 tesori raccolti, aggiungi un tesoro bonus e uno malus
-                if (this.treasuresCollected >= 3 && this.treasuresCollected % 3 === 0) {
-                    // Genera posizioni casuali per i tesori bonus e malus
-                    const bonusPosition = this.generateRandomTreasurePosition();
-                    const malusPosition = this.generateRandomTreasurePosition();
-                    
-                    // Crea i tesori bonus e malus
-                    this.createTreasure(bonusPosition, 'bonus');
-                    this.createTreasure(malusPosition, 'malus');
-                    
-                    console.log('Tesori bonus e malus creati!');
+                // Aggiorna la tabella dei punteggi
+                this.updateScoresTable();
+                
+                // Crea un effetto visivo nella posizione del tesoro
+                this.createTreasureCollectEffect(position, type);
+            }
+            
+            // Rimuovi il tesoro raccolto
+            for (let i = 0; i < this.treasures.length; i++) {
+                const treasure = this.treasures[i];
+                if (treasure && this.isSamePosition(treasure.getPosition(), position)) {
+                    treasure.dispose();
+                    this.treasures.splice(i, 1);
+                    break;
                 }
             }
+            
+            // Genera un nuovo tesoro in una posizione casuale
+            const newPosition = this.generateRandomTreasurePosition();
+            const newType = this.getRandomTreasureType();
+            this.createTreasure(newPosition, newType);
         };
 
         this.gameSocket.onGameState = (data) => {
@@ -945,28 +943,52 @@ class Game {
             this.startGame();
         };
         
+        // Gestione dell'evento di aggiornamento del punteggio
+        this.gameSocket.onScoreUpdate = (playerId, score) => {
+            const player = this.players.get(playerId);
+            if (player) {
+                player.score = score;
+                this.updateScoresTable();
+            }
+        };
+        
+        // Gestione dell'evento di fine partita
+        this.gameSocket.onGameOver = (data) => {
+            console.log('Partita terminata!', data);
+            
+            // Mostra un messaggio con il vincitore
+            const winnerName = data.winnerId === this.gameSocket.playerId ? 
+                'Tu' : 
+                (this.players.get(data.winnerId)?.playerName || 'Altro giocatore');
+            
+            alert(`Partita terminata! Vincitore: ${winnerName}\nMotivo: ${data.reason}`);
+            
+            // Resetta il gioco
+            this.resetGame();
+        };
+        
         // Connetti al server
         this.gameSocket.connect();
     }
 
     setupGameTimer() {
-        this.gameTime = 600; // 10 minuti in secondi
-        this.timerElement = document.getElementById('timer');
-        
-        this.timerInterval = setInterval(() => {
-            this.gameTime--;
-            const minutes = Math.floor(this.gameTime / 60);
-            const seconds = this.gameTime % 60;
-            this.timerElement.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-
-            if (this.gameTime <= 0) {
-                this.endGame();
+        // Inizializza il timer di gioco
+        this.gameTimer = setInterval(() => {
+            if (this.gameStarted && this.gameTime > 0) {
+                this.gameTime--;
+                this.updateGameTimer();
+                
+                // Termina la partita quando il tempo scade
+                if (this.gameTime <= 0) {
+                    clearInterval(this.gameTimer);
+                    // Il server gestirà la fine della partita
+                }
             }
         }, 1000);
     }
 
     endGame() {
-        clearInterval(this.timerInterval);
+        clearInterval(this.gameTimer);
         document.getElementById('game-over').classList.remove('hidden');
         // Trova il vincitore
         let maxScore = 0;
@@ -1249,21 +1271,15 @@ class Game {
 
     /**
      * Crea un tesoro nella posizione specificata
-     * @param {Object} position - Posizione del tesoro
-     * @param {string} type - Tipo di tesoro ('normal', 'bonus', 'malus')
      */
     createTreasure(position, type = 'normal') {
-        const treasureY = this.getTerrainHeight(position.x, position.z);
-        const adjustedPosition = {
-            x: position.x,
-            y: treasureY,
-            z: position.z
-        };
+        console.log(`Creazione tesoro di tipo ${type} in posizione:`, position);
         
-        const treasure = new Treasure(this.scene, adjustedPosition, type);
+        // Crea un nuovo tesoro
+        const treasure = new Treasure(this.scene, position, type);
+        
+        // Aggiungi il tesoro all'array
         this.treasures.push(treasure);
-        
-        console.log(`Tesoro di tipo ${type} creato in posizione:`, adjustedPosition);
         
         return treasure;
     }
@@ -1272,46 +1288,76 @@ class Game {
      * Genera una posizione casuale per un tesoro
      */
     generateRandomTreasurePosition() {
+        // Genera una posizione casuale sull'isola
         const angle = Math.random() * Math.PI * 2;
-        const radius = 20 + Math.random() * 80;
+        const radius = 20 + Math.random() * 60; // Tra 20 e 80 unità dal centro
         
-        return {
-            x: Math.cos(angle) * radius,
-            y: 0,
-            z: Math.sin(angle) * radius
-        };
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        
+        // Ottieni l'altezza del terreno in quella posizione
+        const y = this.getTerrainHeight(x, z) + 1;
+        
+        return { x, y, z };
     }
 
-    // Funzione per mostrare un messaggio temporaneo con il tipo di tesoro raccolto
-    showTreasureMessage(treasureType) {
+    /**
+     * Mostra un messaggio quando un tesoro viene raccolto
+     */
+    showTreasureMessage(treasureType, points) {
         // Crea un elemento per il messaggio
         const messageElement = document.createElement('div');
-        messageElement.className = `treasure-message ${treasureType}`;
+        messageElement.style.position = 'absolute';
+        messageElement.style.top = '50%';
+        messageElement.style.left = '50%';
+        messageElement.style.transform = 'translate(-50%, -50%)';
+        messageElement.style.padding = '20px';
+        messageElement.style.borderRadius = '10px';
+        messageElement.style.fontFamily = 'Arial, sans-serif';
+        messageElement.style.fontSize = '24px';
+        messageElement.style.fontWeight = 'bold';
+        messageElement.style.textAlign = 'center';
+        messageElement.style.zIndex = '1000';
+        messageElement.style.opacity = '0';
+        messageElement.style.transition = 'opacity 0.5s';
         
-        let icon, text, points;
+        // Imposta stile e messaggio in base al tipo di tesoro
+        let message, color, backgroundColor;
+        
         switch(treasureType) {
-            case 'bonus':
-                icon = '💎';
-                text = 'Tesoro Bonus';
-                points = '+2';
+            case 'blue':
+                message = `Tesoro Blu! +${points} punti`;
+                color = 'white';
+                backgroundColor = 'rgba(0, 100, 255, 0.8)';
                 break;
-            case 'malus':
-                icon = '💀';
-                text = 'Tesoro Malus';
-                points = '-1';
+            case 'red':
+                message = `Tesoro Rosso! ${points} punti`;
+                color = 'white';
+                backgroundColor = 'rgba(255, 50, 50, 0.8)';
                 break;
+            case 'normal':
             default:
-                icon = '🏆';
-                text = 'Tesoro';
-                points = '+1';
+                message = `Tesoro! +${points} punti`;
+                color = 'black';
+                backgroundColor = 'rgba(255, 215, 0, 0.8)';
+                break;
         }
         
-        messageElement.innerHTML = `<span class="treasure-icon">${icon}</span> ${text} <span class="points">${points}</span>`;
+        messageElement.textContent = message;
+        messageElement.style.color = color;
+        messageElement.style.backgroundColor = backgroundColor;
+        
+        // Aggiungi il messaggio al DOM
         document.body.appendChild(messageElement);
+        
+        // Mostra il messaggio con una transizione
+        setTimeout(() => {
+            messageElement.style.opacity = '1';
+        }, 10);
         
         // Rimuovi il messaggio dopo 2 secondi
         setTimeout(() => {
-            messageElement.classList.add('fade-out');
+            messageElement.style.opacity = '0';
             setTimeout(() => {
                 document.body.removeChild(messageElement);
             }, 500);
@@ -1320,22 +1366,29 @@ class Game {
     
     // Funzione per iniziare la partita
     startGame() {
-        console.log('Starting game...');
-        
-        // Imposta lo stato del gioco
-        this.inLobby = false;
+        console.log('Partita iniziata!');
         this.gameStarted = true;
+        this.inLobby = false;
         
-        // Mostra l'HUD
-        document.getElementById('hud').classList.remove('hidden');
-        document.getElementById('treasure-info').classList.remove('hidden');
+        // Nascondi la schermata della lobby
+        if (this.lobbyScreen) {
+            this.lobbyScreen.style.display = 'none';
+        }
         
-        // Crea il primo tesoro
-        const treasurePosition = this.generateRandomTreasurePosition();
-        this.createTreasure(treasurePosition, 'normal');
+        // Mostra l'HUD del gioco
+        if (this.hud) {
+            this.hud.style.display = 'block';
+        }
         
-        // Avvia il timer di gioco
-        this.setupGameTimer();
+        // Resetta il timer
+        this.gameTime = 300;
+        this.updateGameTimer();
+        
+        // Aggiorna la tabella dei punteggi
+        this.updateScoresTable();
+        
+        // Altre operazioni di inizializzazione del gioco
+        // ...
     }
     
     // Funzione per resettare lo stato del gioco
@@ -1355,6 +1408,237 @@ class Game {
         
         // Resetta il punteggio nell'interfaccia utente
         document.getElementById('score').textContent = 'Tesori: 0';
+    }
+
+    /**
+     * Crea l'HUD del gioco con timer e punteggi
+     */
+    createGameHUD() {
+        // Crea il container dell'HUD
+        this.hud = document.createElement('div');
+        this.hud.id = 'game-hud';
+        this.hud.style.position = 'absolute';
+        this.hud.style.top = '10px';
+        this.hud.style.left = '10px';
+        this.hud.style.padding = '10px';
+        this.hud.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+        this.hud.style.color = 'white';
+        this.hud.style.fontFamily = 'Arial, sans-serif';
+        this.hud.style.borderRadius = '5px';
+        this.hud.style.display = 'none'; // Nascosto all'inizio
+        
+        // Timer
+        this.timerElement = document.createElement('div');
+        this.timerElement.id = 'game-timer';
+        this.timerElement.innerHTML = `Tempo: <span>05:00</span>`;
+        this.hud.appendChild(this.timerElement);
+        
+        // Punteggio del giocatore locale
+        this.scoreElement = document.createElement('div');
+        this.scoreElement.id = 'player-score';
+        this.scoreElement.innerHTML = `Tesori: <span>0</span>`;
+        this.hud.appendChild(this.scoreElement);
+        
+        // Tabella dei punteggi
+        this.scoresTable = document.createElement('div');
+        this.scoresTable.id = 'scores-table';
+        this.scoresTable.style.marginTop = '10px';
+        this.scoresTable.innerHTML = '<h3 style="margin: 0 0 5px 0;">Punteggi</h3>';
+        this.hud.appendChild(this.scoresTable);
+        
+        // Aggiungi l'HUD al DOM
+        document.body.appendChild(this.hud);
+    }
+
+    /**
+     * Aggiorna il timer del gioco
+     */
+    updateGameTimer() {
+        if (!this.gameStarted) return;
+        
+        // Calcola minuti e secondi
+        const minutes = Math.floor(this.gameTime / 60);
+        const seconds = this.gameTime % 60;
+        
+        // Formatta il tempo
+        const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        
+        // Aggiorna l'elemento del timer
+        const timerSpan = this.timerElement.querySelector('span');
+        if (timerSpan) {
+            timerSpan.textContent = formattedTime;
+        }
+        
+        // Cambia il colore quando il tempo sta per scadere
+        if (this.gameTime <= 30) {
+            timerSpan.style.color = 'red';
+        } else if (this.gameTime <= 60) {
+            timerSpan.style.color = 'orange';
+        } else {
+            timerSpan.style.color = 'white';
+        }
+    }
+
+    /**
+     * Aggiorna la tabella dei punteggi
+     */
+    updateScoresTable() {
+        if (!this.gameStarted) return;
+        
+        // Crea un array di giocatori con i loro punteggi
+        const playerScores = [];
+        
+        this.players.forEach((player, id) => {
+            playerScores.push({
+                id: id,
+                name: player.playerName,
+                score: player.score || 0,
+                isLocal: player.isLocalPlayer
+            });
+        });
+        
+        // Ordina i giocatori per punteggio (decrescente)
+        playerScores.sort((a, b) => b.score - a.score);
+        
+        // Crea la tabella HTML
+        let tableHTML = '<table style="width: 100%; border-collapse: collapse;">';
+        tableHTML += '<tr><th style="text-align: left;">Giocatore</th><th style="text-align: right;">Punti</th></tr>';
+        
+        playerScores.forEach(player => {
+            const style = player.isLocal ? 'color: #00ff00;' : '';
+            tableHTML += `<tr style="${style}">
+                <td style="padding: 2px 5px;">${player.name}</td>
+                <td style="text-align: right; padding: 2px 5px;">${player.score}</td>
+            </tr>`;
+        });
+        
+        tableHTML += '</table>';
+        
+        // Aggiorna la tabella
+        this.scoresTable.innerHTML = '<h3 style="margin: 0 0 5px 0;">Punteggi</h3>' + tableHTML;
+        
+        // Aggiorna anche il punteggio del giocatore locale
+        const localPlayer = Array.from(this.players.values()).find(p => p.isLocalPlayer);
+        if (localPlayer) {
+            const scoreSpan = this.scoreElement.querySelector('span');
+            if (scoreSpan) {
+                scoreSpan.textContent = localPlayer.score || 0;
+            }
+        }
+    }
+
+    /**
+     * Verifica se due posizioni sono uguali (con una certa tolleranza)
+     */
+    isSamePosition(pos1, pos2, tolerance = 1) {
+        return Math.abs(pos1.x - pos2.x) < tolerance &&
+               Math.abs(pos1.y - pos2.y) < tolerance &&
+               Math.abs(pos1.z - pos2.z) < tolerance;
+    }
+
+    /**
+     * Crea un effetto visivo quando un tesoro viene raccolto
+     */
+    createTreasureCollectEffect(position, type) {
+        // Colore dell'effetto in base al tipo di tesoro
+        let color;
+        switch(type) {
+            case 'blue': color = 0x0088ff; break;
+            case 'red': color = 0xff3333; break;
+            case 'normal': default: color = 0xffcc00; break;
+        }
+        
+        // Crea un'esplosione di particelle
+        const particleCount = 50;
+        const particleGeometry = new THREE.BufferGeometry();
+        const particlePositions = new Float32Array(particleCount * 3);
+        const particleVelocities = [];
+        
+        for (let i = 0; i < particleCount; i++) {
+            const i3 = i * 3;
+            particlePositions[i3] = position.x;
+            particlePositions[i3 + 1] = position.y;
+            particlePositions[i3 + 2] = position.z;
+            
+            // Velocità casuale per ogni particella
+            particleVelocities.push({
+                x: (Math.random() - 0.5) * 0.3,
+                y: Math.random() * 0.5,
+                z: (Math.random() - 0.5) * 0.3
+            });
+        }
+        
+        particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+        
+        const particleMaterial = new THREE.PointsMaterial({
+            color: color,
+            size: 0.2,
+            transparent: true,
+            opacity: 1,
+            blending: THREE.AdditiveBlending
+        });
+        
+        const particles = new THREE.Points(particleGeometry, particleMaterial);
+        this.scene.add(particles);
+        
+        // Anima le particelle
+        const startTime = Date.now();
+        const duration = 1000; // 1 secondo
+        
+        const animateParticles = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = elapsed / duration;
+            
+            if (progress >= 1) {
+                // Rimuovi le particelle quando l'animazione è completa
+                this.scene.remove(particles);
+                particleGeometry.dispose();
+                particleMaterial.dispose();
+                return;
+            }
+            
+            // Aggiorna la posizione delle particelle
+            const positions = particles.geometry.attributes.position.array;
+            
+            for (let i = 0; i < particleCount; i++) {
+                const i3 = i * 3;
+                positions[i3] += particleVelocities[i].x;
+                positions[i3 + 1] += particleVelocities[i].y;
+                positions[i3 + 2] += particleVelocities[i].z;
+                
+                // Aggiungi gravità
+                particleVelocities[i].y -= 0.01;
+            }
+            
+            particles.geometry.attributes.position.needsUpdate = true;
+            
+            // Riduci l'opacità gradualmente
+            particles.material.opacity = 1 - progress;
+            
+            requestAnimationFrame(animateParticles);
+        };
+        
+        animateParticles();
+    }
+
+    /**
+     * Restituisce un tipo di tesoro casuale
+     */
+    getRandomTreasureType() {
+        const types = ['normal', 'blue', 'red'];
+        const weights = [0.7, 0.2, 0.1]; // 70% normale, 20% blu, 10% rosso
+        
+        const random = Math.random();
+        let sum = 0;
+        
+        for (let i = 0; i < types.length; i++) {
+            sum += weights[i];
+            if (random < sum) {
+                return types[i];
+            }
+        }
+        
+        return 'normal'; // Fallback
     }
 }
 

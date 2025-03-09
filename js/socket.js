@@ -14,6 +14,9 @@ class GameSocket {
         this.onMatchFound = null; // Nuovo evento per quando viene trovata una partita
         this.connected = false;
         this.pingInterval = null; // Intervallo per il ping
+        this.lastPositionUpdate = 0; // Timestamp dell'ultimo aggiornamento di posizione
+        this.lastPosition = null; // Ultima posizione inviata
+        this.lastRotation = null; // Ultima rotazione inviata
     }
 
     /**
@@ -140,17 +143,49 @@ class GameSocket {
         });
     }
 
+    /**
+     * Invia la posizione e rotazione del giocatore al server
+     * Ottimizzato per inviare aggiornamenti solo quando necessario
+     */
     emitPlayerMove(position, rotation) {
+        // Verifica se siamo connessi
         if (!this.socket || !this.connected) {
             console.warn('Cannot emit playerMove: not connected to server');
             return;
         }
-        this.socket.emit('playerMove', { 
-            position, 
-            rotation,
-            id: this.playerId,
-            matchId: this.matchId
-        });
+        
+        const now = Date.now();
+        const updateInterval = 100; // Invia aggiornamenti al massimo ogni 100ms
+        
+        // Verifica se è passato abbastanza tempo dall'ultimo aggiornamento
+        if (now - this.lastPositionUpdate < updateInterval) {
+            return;
+        }
+        
+        // Verifica se la posizione è cambiata significativamente
+        const positionChanged = !this.lastPosition || 
+            Math.abs(position.x - this.lastPosition.x) > 0.5 ||
+            Math.abs(position.y - this.lastPosition.y) > 0.5 ||
+            Math.abs(position.z - this.lastPosition.z) > 0.5;
+            
+        // Verifica se la rotazione è cambiata significativamente
+        const rotationChanged = !this.lastRotation ||
+            Math.abs(rotation.y - this.lastRotation.y) > 0.1;
+        
+        // Invia l'aggiornamento solo se qualcosa è cambiato significativamente
+        if (positionChanged || rotationChanged) {
+            this.socket.emit('playerMove', {
+                id: this.playerId,
+                position: position,
+                rotation: rotation,
+                matchId: this.matchId
+            });
+            
+            // Aggiorna i timestamp e le ultime posizioni/rotazioni
+            this.lastPositionUpdate = now;
+            this.lastPosition = { ...position };
+            this.lastRotation = { ...rotation };
+        }
     }
 
     emitTreasureCollected(playerId = null, position = null, treasureType = 'normal') {

@@ -34,8 +34,10 @@ const gameState = {
         maxPlayers: 4, // Numero massimo di giocatori per partita
         minPlayers: 2 // Numero minimo di giocatori per iniziare una partita
     },
+    maxMatches: 5, // Numero massimo di partite simultanee
+    inactivityTimeout: 3 * 60 * 1000, // 3 minuti in millisecondi
+    matchTimeout: 5 * 60 * 1000, // 5 minuti in millisecondi
     currentMatchId: 0, // Contatore per generare ID partita univoci
-    inactivityTimeout: 3 * 60 * 1000 // 3 minuti in millisecondi
 };
 
 // Generate random position on island (safe from water)
@@ -331,73 +333,152 @@ function broadcastLobbyUpdate() {
 }
 
 /**
- * Avvia una nuova partita con i giocatori in attesa nella lobby
+ * Avvia una nuova partita con i giocatori in attesa
  */
 function startMatch() {
-    // Genera un nuovo ID per la partita
-    gameState.currentMatchId++;
-    const matchId = `match-${gameState.currentMatchId}`;
+    // Verifica se abbiamo raggiunto il limite di partite
+    if (gameState.matches.size >= gameState.maxMatches) {
+        console.log(`Limite di partite raggiunto (${gameState.maxMatches}). Rimuovo la partita più vecchia.`);
+        // Trova la partita più vecchia
+        const oldestMatchId = [...gameState.matches.keys()][0];
+        if (oldestMatchId) {
+            // Termina la partita più vecchia
+            endMatch(oldestMatchId, 'Partita terminata per fare spazio a nuove partite');
+        }
+    }
+
+    // Genera un ID univoco per la partita
+    const matchId = `match-${Date.now()}`;
     
-    // Crea una nuova partita
-    const match = {
-        players: new Map(),
-        treasure: {
-            position: getRandomPosition(),
-            collected: 0
-        },
-        startTime: Date.now()
-    };
+    // Crea una nuova mappa per i giocatori della partita
+    const matchPlayers = new Map();
     
-    // Aggiungi la partita alla mappa delle partite attive
-    gameState.matches.set(matchId, match);
-    
-    // Seleziona i giocatori dalla lobby (fino al massimo consentito)
-    const playersToAdd = Array.from(gameState.lobby.players.entries())
-        .slice(0, gameState.lobby.maxPlayers);
-    
-    // Dati dei giocatori da inviare a tutti
-    const playersData = [];
-    
-    // Aggiungi i giocatori alla partita
-    playersToAdd.forEach(([playerId, playerData]) => {
-        // Rimuovi il giocatore dalla lobby
+    // Sposta i giocatori dalla lobby alla partita
+    let i = 0;
+    for (const [playerId, playerData] of gameState.lobby.players.entries()) {
+        if (i >= gameState.lobby.maxPlayers) break;
+        
+        matchPlayers.set(playerId, playerData);
         gameState.lobby.players.delete(playerId);
-        
-        // Genera una posizione casuale per il giocatore
-        const position = getRandomPosition();
-        
-        // Aggiungi il giocatore alla partita
-        match.players.set(playerId, {
-            position: position,
-            rotation: { x: 0, y: 0, z: 0 },
-            score: 0
-        });
-        
-        // Aggiungi i dati del giocatore all'array da inviare
-        playersData.push({
-            id: playerId,
-            position: position
-        });
-        
-        // Fai entrare il socket nella room della partita
-        playerData.socket.leave('lobby');
-        playerData.socket.join(matchId);
+        i++;
+    }
+    
+    // Aggiungi la partita alla mappa delle partite
+    gameState.matches.set(matchId, {
+        players: matchPlayers,
+        startTime: Date.now(),
+        treasures: new Map(),
+        scores: new Map()
     });
     
-    // Invia l'evento di partita trovata a tutti i giocatori nella partita
-    playersToAdd.forEach(([playerId, playerData]) => {
-        playerData.socket.emit('matchFound', {
-            matchId: matchId,
-            players: playersData,
-            position: match.players.get(playerId).position,
-            treasure: match.treasure.position
+    console.log(`Nuova partita creata: ${matchId} con ${matchPlayers.size} giocatori`);
+    
+    // Genera posizioni casuali per i giocatori
+    const playerPositions = {};
+    for (const playerId of matchPlayers.keys()) {
+        playerPositions[playerId] = getRandomPosition();
+    }
+    
+    // Genera posizioni casuali per i tesori
+    const treasurePositions = [];
+    for (let i = 0; i < 5; i++) {
+        const position = getPositionFarFrom(Object.values(playerPositions), 20);
+        treasurePositions.push({
+            position,
+            type: getRandomTreasureType()
         });
-    });
+    }
     
-    console.log(`Partita ${matchId} avviata con ${playersToAdd.length} giocatori`);
+    // Invia l'evento di inizio partita a tutti i giocatori
+    for (const [playerId, socket] of matchPlayers.entries()) {
+        // Imposta il matchId nel socket
+        socket.matchId = matchId;
+        
+        // Invia l'evento di inizio partita
+        socket.emit('matchStart', {
+            matchId,
+            players: Array.from(matchPlayers.keys()),
+            positions: playerPositions,
+            treasures: treasurePositions
+        });
+    }
     
-    // Invia un aggiornamento della lobby ai giocatori rimasti in attesa
-    broadcastLobbyUpdate();
+    // Imposta un timer per terminare la partita dopo 5 minuti
+    setTimeout(() => {
+        if (gameState.matches.has(matchId)) {
+            endMatch(matchId, 'Tempo scaduto');
+        }
+    }, gameState.matchTimeout);
+    
+    // Aggiorna il contatore dei giocatori online
+    broadcastOnlinePlayersCount();
+}
+
+/**
+ * Termina una partita e gestisce i risultati
+ */
+function endMatch(matchId, reason) {
+    // Verifica se la partita esiste
+    if (!gameState.matches.has(matchId)) {
+        console.log(`Impossibile terminare la partita ${matchId}: non esiste`);
+        return;
+    }
+    
+    const match = gameState.matches.get(matchId);
+    
+    // Trova il vincitore (giocatore con il punteggio più alto)
+    let winnerId = null;
+    let maxScore = -1;
+    
+    for (const [playerId, score] of match.scores.entries()) {
+        if (score > maxScore) {
+            maxScore = score;
+            winnerId = playerId;
+        }
+    }
+    
+    // Invia l'evento di fine partita a tutti i giocatori
+    for (const [playerId, socket] of match.players.entries()) {
+        socket.emit('gameOver', {
+            winnerId,
+            scores: Object.fromEntries(match.scores),
+            reason
+        });
+        
+        // Reimposta il socket per una nuova partita
+        socket.matchId = null;
+        
+        // Rimetti il giocatore nella lobby
+        gameState.lobby.players.set(playerId, socket);
+    }
+    
+    // Rimuovi la partita dalla mappa
+    gameState.matches.delete(matchId);
+    
+    console.log(`Partita ${matchId} terminata. Vincitore: ${winnerId || 'nessuno'}`);
+    
+    // Aggiorna il contatore dei giocatori online
+    broadcastOnlinePlayersCount();
+}
+
+/**
+ * Restituisce un tipo di tesoro casuale
+ */
+function getRandomTreasureType() {
+    const types = ['normal', 'blue', 'red'];
+    const weights = [0.7, 0.2, 0.1]; // 70% normale, 20% blu, 10% rosso
+    
+    const random = Math.random();
+    let sum = 0;
+    
+    for (let i = 0; i < types.length; i++) {
+        sum += weights[i];
+        if (random < sum) {
+            return types[i];
+        }
+    }
+    
+    return 'normal'; // Fallback
 }
 
 // Start server
@@ -414,6 +495,9 @@ const server = http.listen(PORT, '0.0.0.0', () => {
     
     // Avvia il controllo periodico dei giocatori inattivi
     startInactivityCheck();
+    
+    // Avvia il controllo periodico delle partite inattive
+    startMatchesCheck();
 });
 
 /**
@@ -470,6 +554,37 @@ function broadcastOnlinePlayersCount() {
     
     // Invia l'aggiornamento a tutti i client connessi
     io.emit('onlinePlayersUpdate', totalPlayers);
+}
+
+/**
+ * Avvia il controllo periodico delle partite inattive
+ */
+function startMatchesCheck() {
+    // Controlla le partite inattive ogni minuto
+    setInterval(checkInactiveMatches, 60000);
+    console.log('Match inactivity check started');
+}
+
+/**
+ * Controlla e termina le partite inattive
+ */
+function checkInactiveMatches() {
+    const now = Date.now();
+    
+    // Controlla tutte le partite
+    for (const [matchId, match] of gameState.matches.entries()) {
+        // Verifica se la partita è attiva da troppo tempo
+        if (now - match.startTime > gameState.matchTimeout) {
+            console.log(`Partita ${matchId} attiva da troppo tempo (${Math.floor((now - match.startTime) / 1000)}s). Terminazione.`);
+            endMatch(matchId, 'Tempo scaduto');
+        }
+        
+        // Verifica se ci sono ancora giocatori nella partita
+        if (match.players.size === 0) {
+            console.log(`Partita ${matchId} senza giocatori. Terminazione.`);
+            gameState.matches.delete(matchId);
+        }
+    }
 }
 
 // Gestione degli errori
