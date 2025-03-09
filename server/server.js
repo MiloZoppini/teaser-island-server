@@ -434,8 +434,20 @@ function simulateBotMovement(matchId) {
         
         // Genera un movimento casuale
         const currentPosition = playerData.position || { x: 0, y: 1, z: 0 };
-        const speed = 0.1; // Velocità del movimento
-        const direction = Math.random() * Math.PI * 2; // Direzione casuale in radianti
+        
+        // Velocità variabile per rendere il movimento più naturale
+        const speed = 0.05 + Math.random() * 0.1; // Velocità tra 0.05 e 0.15
+        
+        // Direzione casuale con una probabilità di mantenere la direzione precedente
+        let direction;
+        if (!playerData.lastDirection || Math.random() < 0.1) { // 10% di probabilità di cambiare direzione
+            direction = Math.random() * Math.PI * 2;
+            playerData.lastDirection = direction;
+        } else {
+            // Piccola variazione della direzione precedente
+            direction = playerData.lastDirection + (Math.random() - 0.5) * 0.5;
+            playerData.lastDirection = direction;
+        }
         
         // Calcola la nuova posizione
         let newPosition = {
@@ -452,8 +464,10 @@ function simulateBotMovement(matchId) {
             newPosition = {
                 x: currentPosition.x + Math.cos(angleToCenter) * speed,
                 y: currentPosition.y,
-                z: currentPosition.z + Math.sin(angleToCenter) * speed
+                z: currentPosition.z + Math.sin(direction) * speed
             };
+            // Aggiorna la direzione
+            playerData.lastDirection = angleToCenter;
         }
         
         // Calcola la rotazione in base alla direzione del movimento
@@ -477,10 +491,149 @@ function simulateBotMovement(matchId) {
             position: newPosition,
             rotation: targetRotation
         });
+        
+        // Simula la raccolta di tesori da parte dei bot
+        simulateBotTreasureCollection(matchId, playerId, newPosition);
     }
 
     // Ripeti la simulazione ogni 100ms
     setTimeout(() => simulateBotMovement(matchId), 100);
+}
+
+/**
+ * Simula la raccolta di tesori da parte dei bot
+ * @param {string} matchId - ID della partita
+ * @param {string} botId - ID del bot
+ * @param {Object} botPosition - Posizione del bot
+ */
+function simulateBotTreasureCollection(matchId, botId, botPosition) {
+    const match = gameState.matches.get(matchId);
+    if (!match) return;
+    
+    // Probabilità bassa di raccogliere un tesoro (per non rendere i bot troppo forti)
+    if (Math.random() > 0.005) return; // 0.5% di probabilità ad ogni aggiornamento
+    
+    // Verifica se ci sono tesori nella partita
+    if (!match.treasures || match.treasures.size === 0) return;
+    
+    // Trova il tesoro più vicino
+    let closestTreasure = null;
+    let minDistance = Infinity;
+    
+    for (const [treasureId, treasure] of match.treasures.entries()) {
+        if (!treasure || !treasure.position) continue;
+        
+        const distance = Math.sqrt(
+            Math.pow(botPosition.x - treasure.position.x, 2) +
+            Math.pow(botPosition.z - treasure.position.z, 2)
+        );
+        
+        if (distance < minDistance) {
+            minDistance = distance;
+            closestTreasure = { id: treasureId, ...treasure };
+        }
+    }
+    
+    // Se c'è un tesoro abbastanza vicino, simuliamo la raccolta
+    if (closestTreasure && minDistance < 5) { // Distanza di raccolta
+        console.log(`Bot ${botId} sta raccogliendo un tesoro di tipo ${closestTreasure.type || 'normal'}`);
+        
+        // Simula l'evento di raccolta tesoro
+        const treasureData = {
+            playerId: botId,
+            position: closestTreasure.position,
+            matchId: matchId,
+            treasureType: closestTreasure.type || 'normal'
+        };
+        
+        // Chiama la funzione di gestione tesoro come se fosse un evento reale
+        handleTreasureCollection(treasureData);
+    }
+}
+
+/**
+ * Gestisce la raccolta di un tesoro
+ * @param {Object} data - Dati del tesoro raccolto
+ */
+function handleTreasureCollection(data) {
+    try {
+        console.log('Treasure collected event received:', data);
+        const playerId = data.playerId;
+        const matchId = data.matchId;
+        const treasureType = data.treasureType || 'normal';
+        
+        // Se il giocatore è in una partita, gestisci il tesoro per quella partita
+        if (matchId && gameState.matches.has(matchId)) {
+            const match = gameState.matches.get(matchId);
+            const player = match.players.get(playerId);
+            
+            if (player) {
+                // Incrementa il punteggio del giocatore in base al tipo di tesoro
+                let points = 1;
+                switch(treasureType) {
+                    case 'blue':
+                        points = 2;
+                        player.score += points;
+                        console.log(`Giocatore ${playerId} ha raccolto un tesoro BLU! +${points} punti`);
+                        break;
+                    case 'red':
+                        points = -1;
+                        player.score = Math.max(0, player.score + points);
+                        console.log(`Giocatore ${playerId} ha raccolto un tesoro ROSSO! ${points} punti`);
+                        break;
+                    default: // 'normal'
+                        points = 1;
+                        player.score += points;
+                        console.log(`Giocatore ${playerId} ha raccolto un tesoro NORMALE. +${points} punti`);
+                        break;
+                }
+                
+                // Aggiorna il punteggio nella mappa dei punteggi della partita
+                match.scores.set(playerId, player.score);
+                
+                // Invia l'aggiornamento del punteggio a tutti i giocatori nella partita
+                io.to(matchId).emit('scoreUpdate', playerId, player.score);
+                
+                // Genera una nuova posizione per il tesoro
+                let newPosition;
+                try {
+                    if (data.position) {
+                        // Verifica che la posizione sia valida
+                        if (typeof data.position === 'object' && 'x' in data.position && 'z' in data.position) {
+                            // Usa la posizione inviata dal client per generare una posizione lontana
+                            newPosition = getPositionFarFrom([data.position], 30);
+                        } else {
+                            // Fallback a una posizione casuale
+                            newPosition = getRandomPosition();
+                        }
+                    } else {
+                        // Fallback a una posizione casuale
+                        newPosition = getRandomPosition();
+                    }
+                } catch (error) {
+                    console.error('Errore nella generazione della nuova posizione del tesoro:', error);
+                    // Fallback a una posizione casuale in caso di errore
+                    newPosition = getRandomPosition();
+                }
+                
+                // Genera un nuovo tipo di tesoro
+                const newTreasureType = getRandomTreasureType();
+                
+                // Invia l'evento di aggiornamento del tesoro a tutti i giocatori nella partita
+                io.to(matchId).emit('treasureCollected', playerId, data.position, treasureType);
+                
+                // Invia la nuova posizione e tipo del tesoro
+                io.to(matchId).emit('treasureUpdate', {
+                    position: newPosition,
+                    playerId: playerId,
+                    playerScore: player.score,
+                    treasureType: newTreasureType
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Error in handleTreasureCollection:', error);
+    }
 }
 
 /**
@@ -516,7 +669,8 @@ function startMatch() {
             score: 0, // Inizializza il punteggio
             position: { x: 0, y: 0, z: 0 }, // Posizione iniziale
             rotation: { x: 0, y: 0, z: 0 }, // Rotazione iniziale
-            isBot: false // Per default, i giocatori non sono bot
+            isBot: false, // Per default, i giocatori non sono bot
+            lastDirection: null // Aggiunto per la gestione della direzione
         });
         gameState.lobby.players.delete(playerId);
         i++;
@@ -537,7 +691,8 @@ function startMatch() {
                 score: 0,
                 position: { x: 0, y: 0, z: 0 },
                 rotation: { x: 0, y: 0, z: 0 },
-                isBot: true // Questo è un bot
+                isBot: true, // Questo è un bot
+                lastDirection: null // Aggiunto per la gestione della direzione
             });
             
             console.log(`Bot ${botNickname} (${botId}) aggiunto alla partita`);
@@ -658,8 +813,14 @@ function startMatch() {
         }
     }, gameState.matchTimeout);
     
-    // Avvia la simulazione del movimento dei bot per questa partita
-    simulateBotMovement(matchId);
+    // Verifica se ci sono bot nella partita
+    const hasBots = Array.from(matchPlayers.values()).some(player => player.isBot);
+    
+    // Avvia la simulazione del movimento dei bot solo se ci sono bot nella partita
+    if (hasBots) {
+        console.log(`Avvio simulazione movimento bot per la partita ${matchId}`);
+        simulateBotMovement(matchId);
+    }
     
     // Aggiorna il contatore dei giocatori online
     broadcastOnlinePlayersCount();
