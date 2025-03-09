@@ -324,16 +324,20 @@ io.on('connection', (socket) => {
  * @param {string} playerId - ID del giocatore
  */
 function handleMatchmaking(socket, playerId) {
+    // Genera un nickname per il giocatore
+    const nickname = `player-${Math.random().toString(36).slice(2, 11)}`;
+    
     // Aggiungi il giocatore alla lobby
     gameState.lobby.players.set(playerId, {
         socket: socket,
-        joinTime: Date.now()
+        joinTime: Date.now(),
+        nickname: nickname
     });
     
     // Fai entrare il socket nella room della lobby
     socket.join('lobby');
     
-    console.log(`Giocatore ${playerId} aggiunto alla lobby. Giocatori in lobby: ${gameState.lobby.players.size}`);
+    console.log(`Giocatore ${nickname} (${playerId}) aggiunto alla lobby. Giocatori in lobby: ${gameState.lobby.players.size}`);
     
     // Invia un aggiornamento della lobby a tutti i giocatori in attesa
     broadcastLobbyUpdate();
@@ -348,12 +352,21 @@ function handleMatchmaking(socket, playerId) {
  * Invia un aggiornamento dello stato della lobby a tutti i giocatori in attesa
  */
 function broadcastLobbyUpdate() {
-    const update = {
+    // Prepara i dati della lobby
+    const lobbyData = {
         playersInLobby: gameState.lobby.players.size,
-        maxPlayers: gameState.lobby.maxPlayers
+        maxPlayers: gameState.lobby.maxPlayers,
+        minPlayers: gameState.lobby.minPlayers,
+        players: Array.from(gameState.lobby.players.entries()).map(([id, data]) => ({
+            id,
+            nickname: data.nickname || `player-${id.slice(0, 5)}`
+        }))
     };
     
-    io.to('lobby').emit('lobbyUpdate', update);
+    // Invia l'aggiornamento a tutti i giocatori nella lobby
+    io.to('lobby').emit('lobbyUpdate', lobbyData);
+    
+    console.log(`Lobby update broadcast: ${lobbyData.playersInLobby}/${lobbyData.maxPlayers} giocatori in attesa`);
 }
 
 /**
@@ -385,6 +398,7 @@ function startMatch() {
         matchPlayers.set(playerId, {
             socket: io.sockets.sockets.get(playerId), // Recupera il socket direttamente
             joinTime: playerData.joinTime,
+            nickname: playerData.nickname || `player-${playerId.slice(0, 5)}`, // Usa il nickname dalla lobby o genera uno
             score: 0, // Inizializza il punteggio
             position: { x: 0, y: 0, z: 0 }, // Posizione iniziale
             rotation: { x: 0, y: 0, z: 0 } // Rotazione iniziale
@@ -440,6 +454,15 @@ function startMatch() {
         }
     }
     
+    // Prepara i dati dei giocatori con i loro nickname
+    const playersData = {};
+    for (const [playerId, playerData] of matchPlayers.entries()) {
+        playersData[playerId] = {
+            nickname: playerData.nickname,
+            position: playerPositions[playerId]
+        };
+    }
+    
     // Invia l'evento di inizio partita a tutti i giocatori
     for (const [playerId, playerData] of matchPlayers.entries()) {
         try {
@@ -455,13 +478,16 @@ function startMatch() {
                     matchId,
                     players: Array.from(matchPlayers.keys()),
                     positions: playerPositions,
+                    nicknames: Object.fromEntries(
+                        Array.from(matchPlayers.entries()).map(([id, data]) => [id, data.nickname])
+                    ),
                     treasures: treasurePositions
                 });
                 
                 // Fai entrare il socket nella room della partita
                 socket.join(matchId);
                 
-                console.log(`Evento matchStart inviato al giocatore ${playerId}`);
+                console.log(`Evento matchStart inviato al giocatore ${playerData.nickname} (${playerId})`);
             } else {
                 console.error(`Socket non trovato per il giocatore ${playerId}`);
                 // Rimuovi il giocatore dalla partita se il socket non è valido
@@ -670,31 +696,33 @@ function broadcastOnlinePlayersCount() {
 }
 
 /**
- * Avvia il controllo periodico delle partite inattive
+ * Avvia il controllo periodico delle partite
  */
 function startMatchesCheck() {
-    // Controlla le partite inattive ogni minuto
-    setInterval(checkInactiveMatches, 60000);
-    console.log('Match inactivity check started');
+    // Controlla le partite ogni minuto
+    setInterval(checkMatches, 60000);
+    console.log('Matches check started');
 }
 
 /**
- * Controlla e termina le partite inattive
+ * Controlla le partite attive e termina quelle che durano da troppo tempo
  */
-function checkInactiveMatches() {
+function checkMatches() {
     const now = Date.now();
     
-    // Controlla tutte le partite
+    console.log(`Checking matches... (${gameState.matches.size} active)`);
+    
+    // Controlla ogni partita
     for (const [matchId, match] of gameState.matches.entries()) {
-        // Verifica se la partita è attiva da troppo tempo
+        // Se la partita è attiva da più del tempo massimo, terminala
         if (now - match.startTime > gameState.matchTimeout) {
-            console.log(`Partita ${matchId} attiva da troppo tempo (${Math.floor((now - match.startTime) / 1000)}s). Terminazione.`);
+            console.log(`Match ${matchId} has exceeded time limit. Ending match.`);
             endMatch(matchId, 'Tempo scaduto');
         }
         
-        // Verifica se ci sono ancora giocatori nella partita
+        // Se non ci sono giocatori nella partita, rimuovila
         if (match.players.size === 0) {
-            console.log(`Partita ${matchId} senza giocatori. Terminazione.`);
+            console.log(`Match ${matchId} has no players. Removing match.`);
             gameState.matches.delete(matchId);
         }
     }

@@ -158,10 +158,15 @@ class GameSocket {
             
             // Crea un array di oggetti giocatore con id, position e nickname
             const players = data.players.map(playerId => {
+                // Usa il nickname fornito dal server o genera uno basato sull'ID
+                const nickname = data.nicknames && data.nicknames[playerId] 
+                    ? data.nicknames[playerId] 
+                    : (playerId === this.playerId ? this.playerNickname : `Player-${playerId.substring(0, 5)}`);
+                
                 return {
                     id: playerId,
                     position: data.positions[playerId],
-                    nickname: playerId === this.playerId ? this.playerNickname : `Player-${playerId.substring(0, 5)}`
+                    nickname: nickname
                 };
             });
             
