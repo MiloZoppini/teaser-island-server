@@ -13,6 +13,7 @@ class GameSocket {
         this.onLobbyUpdate = null; // Nuovo evento per aggiornamenti della lobby
         this.onMatchFound = null; // Nuovo evento per quando viene trovata una partita
         this.connected = false;
+        this.pingInterval = null; // Intervallo per il ping
     }
 
     /**
@@ -39,16 +40,21 @@ class GameSocket {
             
             // Richiedi di entrare nella lobby
             this.requestMatchmaking();
+            
+            // Avvia il ping periodico
+            this.startPing();
         });
         
         this.socket.on('connect_error', (error) => {
             console.error('Connection error:', error);
             this.connected = false;
+            this.stopPing();
         });
         
         this.socket.on('disconnect', (reason) => {
             console.log('Disconnected from server:', reason);
             this.connected = false;
+            this.stopPing();
         });
         
         this.setupListeners();
@@ -188,5 +194,31 @@ class GameSocket {
 
     isCurrentPlayer(id) {
         return this.playerId === id;
+    }
+
+    /**
+     * Avvia il ping periodico per mantenere attiva la connessione
+     */
+    startPing() {
+        // Ferma eventuali ping precedenti
+        this.stopPing();
+        
+        // Invia un ping ogni 30 secondi
+        this.pingInterval = setInterval(() => {
+            if (this.connected) {
+                console.log('Sending ping to server');
+                this.socket.emit('ping');
+            }
+        }, 30000); // 30 secondi
+    }
+    
+    /**
+     * Ferma il ping periodico
+     */
+    stopPing() {
+        if (this.pingInterval) {
+            clearInterval(this.pingInterval);
+            this.pingInterval = null;
+        }
     }
 } 

@@ -34,7 +34,8 @@ const gameState = {
         maxPlayers: 4, // Numero massimo di giocatori per partita
         minPlayers: 2 // Numero minimo di giocatori per iniziare una partita
     },
-    currentMatchId: 0 // Contatore per generare ID partita univoci
+    currentMatchId: 0, // Contatore per generare ID partita univoci
+    inactivityTimeout: 3 * 60 * 1000 // 3 minuti in millisecondi
 };
 
 // Generate random position on island (safe from water)
@@ -109,14 +110,22 @@ function getPositionFarFrom(position, minDistance = 30) {
 // Socket.IO connection handling
 io.on('connection', (socket) => {
     console.log('Player connected:', socket.id);
-
+    
+    // Inizializza il timestamp dell'ultima attività
+    socket.lastActivity = Date.now();
+    
     // Gestione degli eventi del socket
     socket.on('requestMatchmaking', (data) => {
         const playerId = data.playerId || socket.id;
+        // Aggiorna il timestamp dell'ultima attività
+        socket.lastActivity = Date.now();
         handleMatchmaking(socket, playerId);
     });
 
     socket.on('playerMove', (data) => {
+        // Aggiorna il timestamp dell'ultima attività
+        socket.lastActivity = Date.now();
+        
         const playerId = data.id || socket.id;
         const matchId = data.matchId;
         
@@ -153,6 +162,9 @@ io.on('connection', (socket) => {
     });
 
     socket.on('treasureCollected', (data) => {
+        // Aggiorna il timestamp dell'ultima attività
+        socket.lastActivity = Date.now();
+        
         console.log('Treasure collected event received:', data);
         const playerId = data.playerId || socket.id;
         const matchId = data.matchId;
@@ -271,6 +283,12 @@ io.on('connection', (socket) => {
         // Fallback al vecchio sistema
         gameState.players.delete(socket.id);
         io.emit('playerLeft', socket.id);
+    });
+    
+    // Ping dal client per mantenere attiva la connessione
+    socket.on('ping', () => {
+        // Aggiorna il timestamp dell'ultima attività
+        socket.lastActivity = Date.now();
     });
 });
 
@@ -393,7 +411,19 @@ const server = http.listen(PORT, '0.0.0.0', () => {
     
     // Avvia l'invio periodico del numero di giocatori online
     startOnlinePlayersUpdates();
+    
+    // Avvia il controllo periodico dei giocatori inattivi
+    startInactivityCheck();
 });
+
+/**
+ * Avvia il controllo periodico dei giocatori inattivi
+ */
+function startInactivityCheck() {
+    // Controlla i giocatori inattivi ogni minuto
+    setInterval(checkInactiveUsers, 60000);
+    console.log('Inactivity check started');
+}
 
 /**
  * Invia periodicamente il numero di giocatori online a tutti i client
@@ -407,16 +437,34 @@ function startOnlinePlayersUpdates() {
 }
 
 /**
+ * Controlla e disconnette i giocatori inattivi
+ */
+function checkInactiveUsers() {
+    const now = Date.now();
+    const inactivityThreshold = now - gameState.inactivityTimeout;
+    
+    console.log('Checking for inactive users...');
+    
+    // Ottieni tutti i socket connessi
+    const connectedSockets = io.sockets.sockets;
+    
+    // Itera su tutti i socket
+    connectedSockets.forEach(socket => {
+        // Se il socket non ha attività recente, disconnettilo
+        if (socket.lastActivity && socket.lastActivity < inactivityThreshold) {
+            console.log(`Disconnecting inactive user: ${socket.id} (inactive for ${Math.floor((now - socket.lastActivity) / 1000 / 60)} minutes)`);
+            socket.disconnect(true);
+        }
+    });
+}
+
+/**
  * Calcola e invia il numero di giocatori online a tutti i client
  */
 function broadcastOnlinePlayersCount() {
-    // Calcola il numero totale di giocatori online (lobby + partite attive)
-    let totalPlayers = gameState.lobby.players.size;
-    
-    // Aggiungi i giocatori nelle partite attive
-    gameState.matches.forEach(match => {
-        totalPlayers += match.players.size;
-    });
+    // Ottieni il numero di socket connessi (più accurato)
+    const connectedSockets = io.sockets.sockets;
+    const totalPlayers = connectedSockets.size;
     
     console.log(`Broadcasting online players count: ${totalPlayers}`);
     
