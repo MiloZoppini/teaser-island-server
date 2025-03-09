@@ -293,13 +293,66 @@ io.on('connection', (socket) => {
         // Salva il nickname nel socket per riferimento futuro
         socket.nickname = nickname;
         
-        // Aggiorna il nickname nel gameState se il giocatore esiste
-        if (gameState.players.has(socket.id)) {
+        // Verifica se il giocatore esiste nel gameState
+        if (!gameState.players.has(socket.id)) {
+            console.log(`Giocatore ${socket.id} non trovato nel gameState, lo aggiungo ora`);
+            // Aggiungi il giocatore al gameState se non esiste
+            gameState.players.set(socket.id, {
+                id: socket.id,
+                position: getRandomPosition(),
+                rotation: { x: 0, y: 0, z: 0 },
+                score: 0,
+                nickname: nickname
+            });
+            
+            // Invia l'evento playerJoined a tutti i client
+            io.emit('playerJoined', {
+                id: socket.id, 
+                position: gameState.players.get(socket.id).position, 
+                nickname: nickname
+            });
+        } else {
+            // Aggiorna il nickname nel gameState se il giocatore esiste
             gameState.players.get(socket.id).nickname = nickname;
         }
         
         console.log(`Richiesta matchmaking da ${nickname} (${playerId})`);
         handleMatchmaking(socket, playerId);
+    });
+    
+    // Aggiungi un gestore specifico per l'evento matchmaking
+    socket.on('matchmaking', (data) => {
+        console.log(`Richiesta matchmaking diretta da ${data.nickname || 'Sconosciuto'} (${socket.id})`);
+        
+        const nickname = data.nickname || socket.nickname || getRandomName();
+        
+        // Verifica se il giocatore esiste nel gameState
+        if (!gameState.players.has(socket.id)) {
+            console.log(`Giocatore ${socket.id} non trovato nel gameState durante matchmaking diretto, lo aggiungo ora`);
+            // Aggiungi il giocatore al gameState se non esiste
+            gameState.players.set(socket.id, {
+                id: socket.id,
+                position: getRandomPosition(),
+                rotation: { x: 0, y: 0, z: 0 },
+                score: 0,
+                nickname: nickname
+            });
+            
+            // Invia l'evento playerJoined a tutti i client
+            io.emit('playerJoined', {
+                id: socket.id, 
+                position: gameState.players.get(socket.id).position, 
+                nickname: nickname
+            });
+        }
+        
+        // Aggiorna il timestamp dell'ultima attività
+        socket.lastActivity = Date.now();
+        
+        // Salva il nickname nel socket per riferimento futuro
+        socket.nickname = nickname;
+        
+        handleMatchmaking(socket, socket.id);
     });
 });
 
@@ -411,7 +464,7 @@ function simulateBotMovement(matchId) {
             newPosition = {
                 x: currentPosition.x + Math.cos(angleToCenter) * speed,
                 y: currentPosition.y,
-                z: currentPosition.z + Math.sin(direction) * speed
+                z: currentPosition.z + Math.sin(angleToCenter) * speed
             };
             // Aggiorna la direzione
             playerData.lastDirection = angleToCenter;
@@ -438,6 +491,9 @@ function simulateBotMovement(matchId) {
             position: newPosition,
             rotation: targetRotation
         });
+        
+        // Log per debug
+        console.log(`Bot ${playerId} (${playerData.nickname}) si è mosso a posizione:`, newPosition);
         
         // Simula la raccolta di tesori da parte dei bot
         simulateBotTreasureCollection(matchId, playerId, newPosition);

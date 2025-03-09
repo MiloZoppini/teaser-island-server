@@ -387,6 +387,8 @@ class Player {
         
         // Aggiungi il tag al modello
         this.model.add(this.nameTag);
+        
+        console.log(`Nome tag aggiunto per il giocatore ${this.playerName}`);
     }
 
     setupCamera() {

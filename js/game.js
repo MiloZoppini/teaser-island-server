@@ -755,14 +755,24 @@ class Game {
 
     setupSocketHandlers() {
         // Gestione degli eventi del socket
-        this.gameSocket.onPlayerJoined = (id, position, nickname) => {
+        this.gameSocket.onPlayerJoined = (data) => {
+            const id = data.id || data;
+            const position = data.position || { x: 0, y: 0, z: 0 };
+            const nickname = data.nickname || 'Sconosciuto';
+            
             console.log(`Player joined: ${id}, nickname: ${nickname}, position:`, position);
-            if (!this.players.has(id)) {
-                if (!this.inLobby || id === this.gameSocket.playerId) {
-                    this.addPlayer(id, position, id === this.gameSocket.playerId, nickname);
-                    if (id === this.gameSocket.playerId) {
-                        console.log('Local player set:', this.localPlayer);
-                    }
+            
+            if (!this.players.has(id) && !this.inLobby) {
+                const adjustedPosition = {
+                    x: position.x,
+                    y: this.getTerrainHeight(position.x, position.z) + 1,
+                    z: position.z
+                };
+                this.addPlayer(id, adjustedPosition, id === this.gameSocket.playerId, nickname);
+                if (id === this.gameSocket.playerId) {
+                    console.log('Local player set:', this.localPlayer);
+                } else {
+                    console.log(`Remote player ${nickname} added to scene`);
                 }
             }
         };
@@ -772,13 +782,24 @@ class Game {
             this.removePlayer(id);
         };
 
-        this.gameSocket.onPlayerMoved = (id, position, rotation) => {
+        this.gameSocket.onPlayerMoved = (data) => {
+            const id = data.id;
+            const position = data.position;
+            const rotation = data.rotation;
+            
+            console.log(`Player moved: ${id}, position:`, position);
+            
             const player = this.players.get(id);
             if (player && !player.isLocalPlayer) {
-                // Evita di loggare ogni movimento per non intasare la console
-                // console.log(`Aggiornamento movimento per ${id}:`, position, rotation);
-                player.setPosition(position);
-                player.setRotation(rotation || { x: 0, y: 0, z: 0 });
+                const adjustedPosition = {
+                    x: position.x,
+                    y: this.getTerrainHeight(position.x, position.z) + 1,
+                    z: position.z
+                };
+                player.setPosition(adjustedPosition);
+                if (rotation) {
+                    player.setRotation(rotation);
+                }
             }
         };
 
@@ -1072,28 +1093,35 @@ class Game {
     }
 
     animate() {
-        // Utilizziamo requestAnimationFrame con un riferimento diretto al metodo
-        // per evitare la creazione di funzioni anonime ad ogni frame
-        this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
+        if (!this.scene || !this.camera || !this.renderer) return;
         
-        // Calcoliamo il delta time
-        const deltaTime = this.clock.getDelta();
+        requestAnimationFrame(() => this.animate());
+        
+        const delta = this.clock.getDelta();
         const time = this.clock.getElapsedTime();
-
-        // Ottimizzazione: aggiorniamo solo gli elementi visibili
-        this.updateVisibleElements(deltaTime, time);
         
-        // Invia l'aggiornamento della posizione del giocatore locale
-        // ma limitiamo la frequenza per ridurre il traffico di rete
-        if (this.localPlayer && (time - (this.lastUpdateTime || 0) > 0.05)) { // 20 aggiornamenti al secondo
-            this.gameSocket.emitPlayerMove(
-                this.localPlayer.getPosition(),
-                this.localPlayer.getRotation()
-            );
-            this.lastUpdateTime = time;
+        // Aggiorna gli elementi visibili
+        this.updateVisibleElements(delta, time);
+        
+        // Aggiorna tutti i giocatori
+        this.players.forEach(player => {
+            if (player) {
+                player.update();
+            }
+        });
+        
+        // Aggiorna la tabella dei punteggi
+        if (this.gameStarted && time - this.lastScoreUpdate > 1) {
+            this.updateScoresTable();
+            this.lastScoreUpdate = time;
         }
         
-        // Rendering
+        // Aggiorna il timer di gioco
+        if (this.gameStarted && this.gameTimer) {
+            this.updateGameTimer();
+        }
+        
+        // Renderizza la scena
         this.renderScene();
     }
     
