@@ -144,20 +144,31 @@ io.on('connection', (socket) => {
     // Inizializza il timestamp dell'ultima attività
     socket.lastActivity = Date.now();
     
-    // Gestione degli eventi del socket
-    socket.on('requestMatchmaking', (data) => {
-        const playerId = data.playerId || socket.id;
-        // Aggiorna il timestamp dell'ultima attività
-        socket.lastActivity = Date.now();
-        handleMatchmaking(socket, playerId);
+    // Aggiungi il giocatore al game state
+    gameState.players.set(socket.id, {
+        id: socket.id,
+        position: getRandomPosition(),
+        rotation: { x: 0, y: 0, z: 0 },
+        score: 0,
+        nickname: `player-${Math.random().toString(36).slice(2, 11)}`
     });
+    
+    // Invia l'evento playerJoined a tutti i client
+    io.emit('playerJoined', {
+        id: socket.id, 
+        position: gameState.players.get(socket.id).position, 
+        nickname: gameState.players.get(socket.id).nickname
+    });
+    
+    // Aggiungi il giocatore alla lobby per il matchmaking
+    handleMatchmaking(socket, socket.id);
 
     socket.on('playerMove', (data) => {
         // Aggiorna il timestamp dell'ultima attività
         socket.lastActivity = Date.now();
         
         const playerId = data.id || socket.id;
-        const matchId = data.matchId;
+        const matchId = socket.matchId;
         
         // Se il giocatore è in una partita, invia l'aggiornamento solo ai giocatori di quella partita
         if (matchId && gameState.matches.has(matchId)) {
@@ -198,7 +209,7 @@ io.on('connection', (socket) => {
             
             console.log('Treasure collected event received:', data);
             const playerId = data.playerId || socket.id;
-            const matchId = data.matchId;
+            const matchId = socket.matchId;
             const treasureType = data.treasureType || 'normal';
             
             // Se il giocatore è in una partita, gestisci il tesoro per quella partita
@@ -208,20 +219,30 @@ io.on('connection', (socket) => {
                 
                 if (player) {
                     // Incrementa il punteggio del giocatore in base al tipo di tesoro
+                    let points = 1;
                     switch(treasureType) {
-                        case 'bonus':
-                            player.score += 2; // Il tesoro bonus vale 2 punti
-                            console.log(`Giocatore ${playerId} ha raccolto un tesoro BONUS! +2 punti`);
+                        case 'blue':
+                            points = 2;
+                            player.score += points;
+                            console.log(`Giocatore ${playerId} ha raccolto un tesoro BLU! +${points} punti`);
                             break;
-                        case 'malus':
-                            player.score = Math.max(0, player.score - 1); // Il tesoro malus toglie 1 punto (minimo 0)
-                            console.log(`Giocatore ${playerId} ha raccolto un tesoro MALUS! -1 punto`);
+                        case 'red':
+                            points = -1;
+                            player.score = Math.max(0, player.score + points);
+                            console.log(`Giocatore ${playerId} ha raccolto un tesoro ROSSO! ${points} punti`);
                             break;
                         default: // 'normal'
-                            player.score += 1; // Il tesoro normale vale 1 punto
-                            console.log(`Giocatore ${playerId} ha raccolto un tesoro normale. +1 punto`);
+                            points = 1;
+                            player.score += points;
+                            console.log(`Giocatore ${playerId} ha raccolto un tesoro NORMALE. +${points} punti`);
                             break;
                     }
+                    
+                    // Aggiorna il punteggio nella mappa dei punteggi della partita
+                    match.scores.set(playerId, player.score);
+                    
+                    // Invia l'aggiornamento del punteggio a tutti i giocatori nella partita
+                    io.to(matchId).emit('scoreUpdate', playerId, player.score);
                     
                     // Genera una nuova posizione per il tesoro
                     let newPosition;
@@ -249,6 +270,9 @@ io.on('connection', (socket) => {
                     const newTreasureType = getRandomTreasureType();
                     
                     // Invia l'evento di aggiornamento del tesoro a tutti i giocatori nella partita
+                    io.to(matchId).emit('treasureCollected', playerId, data.position, treasureType);
+                    
+                    // Invia la nuova posizione e tipo del tesoro
                     io.to(matchId).emit('treasureUpdate', {
                         position: newPosition,
                         playerId: playerId,
@@ -272,7 +296,7 @@ io.on('connection', (socket) => {
                         position: gameState.treasure.position,
                         playerId: socket.id,
                         playerScore: player.score,
-                        treasureType: 'normal' // Il nuovo tesoro è sempre di tipo normale
+                        treasureType: 'normal'
                     });
                 }
             }
@@ -302,6 +326,7 @@ io.on('connection', (socket) => {
                 // Se non ci sono più giocatori, rimuovi la partita
                 if (match.players.size === 0) {
                     gameState.matches.delete(matchId);
+                    console.log(`Partita ${matchId} terminata: nessun giocatore rimasto`);
                 }
             }
         });
@@ -309,12 +334,35 @@ io.on('connection', (socket) => {
         // Fallback al vecchio sistema
         gameState.players.delete(socket.id);
         io.emit('playerLeft', socket.id);
+        
+        // Aggiorna il contatore dei giocatori online
+        broadcastOnlinePlayersCount();
     });
     
     // Ping dal client per mantenere attiva la connessione
     socket.on('ping', () => {
         // Aggiorna il timestamp dell'ultima attività
         socket.lastActivity = Date.now();
+    });
+
+    // Gestione degli eventi del socket
+    socket.on('requestMatchmaking', (data) => {
+        const playerId = data.playerId || socket.id;
+        const nickname = data.nickname || gameState.players.get(socket.id)?.nickname || `player-${Math.random().toString(36).slice(2, 11)}`;
+        
+        // Aggiorna il timestamp dell'ultima attività
+        socket.lastActivity = Date.now();
+        
+        // Salva il nickname nel socket per riferimento futuro
+        socket.nickname = nickname;
+        
+        // Aggiorna il nickname nel gameState se il giocatore esiste
+        if (gameState.players.has(socket.id)) {
+            gameState.players.get(socket.id).nickname = nickname;
+        }
+        
+        console.log(`Richiesta matchmaking da ${nickname} (${playerId})`);
+        handleMatchmaking(socket, playerId);
     });
 });
 
@@ -324,8 +372,10 @@ io.on('connection', (socket) => {
  * @param {string} playerId - ID del giocatore
  */
 function handleMatchmaking(socket, playerId) {
-    // Genera un nickname per il giocatore
-    const nickname = `player-${Math.random().toString(36).slice(2, 11)}`;
+    // Usa il nickname memorizzato nel socket o genera un nickname casuale
+    const nickname = socket.nickname || 
+                    (gameState.players.get(playerId)?.nickname) || 
+                    `player-${Math.random().toString(36).slice(2, 11)}`;
     
     // Aggiungi il giocatore alla lobby
     gameState.lobby.players.set(playerId, {
