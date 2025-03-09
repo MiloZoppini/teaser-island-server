@@ -368,12 +368,8 @@ class Player {
         
         console.log('Camera setup completato per il giocatore locale');
         
-        // Blocchiamo il puntatore per una migliore esperienza
-        document.addEventListener('click', () => {
-            if (document.pointerLockElement !== document.body) {
-                document.body.requestPointerLock();
-            }
-        });
+        // Inizializza la variabile per il blocco del puntatore
+        this.pointerLocked = false;
         
         // Aggiungiamo un listener per l'evento di resize della finestra
         window.addEventListener('resize', () => {
@@ -383,6 +379,17 @@ class Player {
         
         // Aggiungiamo un pulsante per passare dalla vista in prima persona a quella in terza persona
         this.createViewSwitchButton();
+        
+        // Aggiungiamo un pulsante per bloccare/sbloccare il puntatore
+        this.createPointerLockButton();
+        
+        // Aggiungiamo un listener per il tasto Escape per sbloccare il puntatore
+        document.addEventListener('pointerlockchange', () => {
+            this.pointerLocked = document.pointerLockElement === document.body;
+            if (this.pointerLockButton) {
+                this.pointerLockButton.textContent = this.pointerLocked ? 'Sblocca Mouse (L)' : 'Blocca Mouse (L)';
+            }
+        });
     }
 
     createViewSwitchButton() {
@@ -531,23 +538,26 @@ class Player {
     }
 
     onMouseMove(event) {
-        if (!this.isLocalPlayer || document.pointerLockElement !== document.body) return;
+        if (!this.isLocalPlayer) return;
         
-        // Sensibilità del mouse (più basso = più sensibile)
-        const sensitivity = 0.002;
-        
-        // Calcola la rotazione orizzontale (sinistra/destra)
-        this.model.rotation.y -= event.movementX * sensitivity;
-        
-        // Calcola la rotazione verticale (su/giù)
-        this.verticalAngle -= event.movementY * sensitivity;
-        
-        // Limita la rotazione verticale per evitare che la camera si capovolga
-        const maxVerticalAngle = Math.PI / 3; // 60 gradi
-        this.verticalAngle = Math.max(-maxVerticalAngle, Math.min(maxVerticalAngle, this.verticalAngle));
-        
-        // Aggiorna la posizione della camera
-        this.updateCameraPosition();
+        // Applica la rotazione solo se il puntatore è bloccato
+        if (document.pointerLockElement === document.body) {
+            // Sensibilità del mouse (più basso = più sensibile)
+            const sensitivity = 0.002;
+            
+            // Calcola la rotazione orizzontale (sinistra/destra)
+            this.model.rotation.y -= event.movementX * sensitivity;
+            
+            // Calcola la rotazione verticale (su/giù)
+            this.verticalAngle -= event.movementY * sensitivity;
+            
+            // Limita la rotazione verticale per evitare che la camera si capovolga
+            const maxVerticalAngle = Math.PI / 3; // 60 gradi
+            this.verticalAngle = Math.max(-maxVerticalAngle, Math.min(maxVerticalAngle, this.verticalAngle));
+            
+            // Aggiorna la posizione della camera
+            this.updateCameraPosition();
+        }
     }
 
     jump() {
@@ -844,6 +854,36 @@ class Player {
                 const leanAmount = 0.02;
                 this.model.rotation.z = Math.sin(time * animationSpeed) * leanAmount;
             }
+        }
+    }
+
+    createPointerLockButton() {
+        // Crea un pulsante per bloccare/sbloccare il puntatore
+        this.pointerLockButton = document.createElement('button');
+        this.pointerLockButton.className = 'pointer-lock-button';
+        this.pointerLockButton.textContent = 'Blocca Mouse (L)';
+        document.body.appendChild(this.pointerLockButton);
+        
+        // Aggiungi l'evento click
+        this.pointerLockButton.addEventListener('click', () => {
+            this.togglePointerLock();
+        });
+        
+        // Aggiungi anche il tasto L per bloccare/sbloccare il puntatore
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'KeyL') {
+                this.togglePointerLock();
+            }
+        });
+    }
+    
+    togglePointerLock() {
+        if (document.pointerLockElement === document.body) {
+            document.exitPointerLock();
+            this.pointerLocked = false;
+        } else {
+            document.body.requestPointerLock();
+            this.pointerLocked = true;
         }
     }
 
