@@ -207,101 +207,15 @@ io.on('connection', (socket) => {
             // Aggiorna il timestamp dell'ultima attività
             socket.lastActivity = Date.now();
             
-            console.log('Treasure collected event received:', data);
-            const playerId = data.playerId || socket.id;
-            const matchId = socket.matchId;
-            const treasureType = data.treasureType || 'normal';
-            
-            // Se il giocatore è in una partita, gestisci il tesoro per quella partita
-            if (matchId && gameState.matches.has(matchId)) {
-                const match = gameState.matches.get(matchId);
-                const player = match.players.get(playerId);
-                
-                if (player) {
-                    // Incrementa il punteggio del giocatore in base al tipo di tesoro
-                    let points = 1;
-                    switch(treasureType) {
-                        case 'blue':
-                            points = 2;
-                            player.score += points;
-                            console.log(`Giocatore ${playerId} ha raccolto un tesoro BLU! +${points} punti`);
-                            break;
-                        case 'red':
-                            points = -1;
-                            player.score = Math.max(0, player.score + points);
-                            console.log(`Giocatore ${playerId} ha raccolto un tesoro ROSSO! ${points} punti`);
-                            break;
-                        default: // 'normal'
-                            points = 1;
-                            player.score += points;
-                            console.log(`Giocatore ${playerId} ha raccolto un tesoro NORMALE. +${points} punti`);
-                            break;
-                    }
-                    
-                    // Aggiorna il punteggio nella mappa dei punteggi della partita
-                    match.scores.set(playerId, player.score);
-                    
-                    // Invia l'aggiornamento del punteggio a tutti i giocatori nella partita
-                    io.to(matchId).emit('scoreUpdate', playerId, player.score);
-                    
-                    // Genera una nuova posizione per il tesoro
-                    let newPosition;
-                    try {
-                        if (data.position) {
-                            // Verifica che la posizione sia valida
-                            if (typeof data.position === 'object' && 'x' in data.position && 'z' in data.position) {
-                                // Usa la posizione inviata dal client per generare una posizione lontana
-                                newPosition = getPositionFarFrom([data.position], 30);
-                            } else {
-                                // Fallback a una posizione casuale
-                                newPosition = getRandomPosition();
-                            }
-                        } else {
-                            // Fallback a una posizione casuale
-                            newPosition = getRandomPosition();
-                        }
-                    } catch (error) {
-                        console.error('Errore nella generazione della nuova posizione del tesoro:', error);
-                        // Fallback a una posizione casuale in caso di errore
-                        newPosition = getRandomPosition();
-                    }
-                    
-                    // Genera un nuovo tipo di tesoro
-                    const newTreasureType = getRandomTreasureType();
-                    
-                    // Invia l'evento di aggiornamento del tesoro a tutti i giocatori nella partita
-                    io.to(matchId).emit('treasureCollected', playerId, data.position, treasureType);
-                    
-                    // Invia la nuova posizione e tipo del tesoro
-                    io.to(matchId).emit('treasureUpdate', {
-                        position: newPosition,
-                        playerId: playerId,
-                        playerScore: player.score,
-                        treasureType: newTreasureType
-                    });
-                }
-            } else {
-                // Fallback al vecchio sistema
-                const player = gameState.players.get(socket.id);
-                if (player) {
-                    // Incrementa il punteggio del giocatore
-                    player.score = (player.score || 0) + 1;
-                    
-                    // Genera una nuova posizione per il tesoro
-                    gameState.treasure.position = getRandomPosition();
-                    gameState.treasure.collected++;
-                    
-                    // Invia l'evento di aggiornamento del tesoro a tutti i client
-                    io.emit('treasureUpdate', {
-                        position: gameState.treasure.position,
-                        playerId: socket.id,
-                        playerScore: player.score,
-                        treasureType: 'normal'
-                    });
-                }
+            // Aggiungi l'ID della partita ai dati se non è presente
+            if (!data.matchId && socket.matchId) {
+                data.matchId = socket.matchId;
             }
+            
+            // Utilizza la funzione comune per gestire la raccolta del tesoro
+            handleTreasureCollection(data);
         } catch (error) {
-            console.error('Error in treasureCollected:', error);
+            console.error('Error in treasureCollected event:', error);
         }
     });
 
@@ -683,7 +597,7 @@ function startMatch() {
         
         for (let j = 0; j < botsNeeded; j++) {
             const botId = `bot-${Date.now()}-${j}`;
-            const botNickname = `Bot-${Math.random().toString(36).slice(2, 6)}`;
+            const botNickname = getRandomItalianName();
             
             matchPlayers.set(botId, {
                 joinTime: Date.now(),
@@ -921,6 +835,28 @@ function getRandomTreasureType() {
     }
     
     return 'normal'; // Fallback
+}
+
+/**
+ * Genera un nome italiano casuale per un bot
+ * @returns {string} Nome casuale
+ */
+function getRandomItalianName() {
+    const firstNames = [
+        "Marco", "Sofia", "Luca", "Giulia", "Alessandro", "Martina", "Davide", "Chiara",
+        "Francesco", "Anna", "Matteo", "Sara", "Lorenzo", "Elena", "Simone", "Valentina",
+        "Andrea", "Laura", "Giovanni", "Francesca", "Riccardo", "Elisa", "Tommaso", "Giorgia"
+    ];
+    
+    const suffixes = [
+        "Bot", "AI", "Robot", "Virtual", "Auto", "Sim", "Digital", "Cyber",
+        "Tech", "Mech", "Droid", "Machine", "System", "Program", "Assistant", "Helper"
+    ];
+    
+    const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+    const suffix = suffixes[Math.floor(Math.random() * suffixes.length)];
+    
+    return `${firstName}${suffix}`;
 }
 
 // Start server

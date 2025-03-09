@@ -2,7 +2,10 @@ class GameSocket {
     constructor() {
         this.socket = null;
         this.playerId = this.generatePlayerId(); // Genera un ID univoco per il giocatore
-        this.playerNickname = localStorage.getItem('playerNickname') || 'Giocatore'; // Recupera il nickname dal localStorage
+        
+        // Genera un nickname italiano casuale se non è già salvato nel localStorage
+        this.playerNickname = localStorage.getItem('playerNickname') || this.generateRandomItalianName();
+        
         this.matchId = null; // ID della partita corrente
         this.onGameState = null;
         this.onPlayerJoined = null;
@@ -24,6 +27,32 @@ class GameSocket {
      */
     generatePlayerId() {
         return 'player-' + Math.random().toString(36).substr(2, 9);
+    }
+
+    /**
+     * Genera un nickname italiano casuale
+     */
+    generateRandomItalianName() {
+        const firstNames = [
+            "Marco", "Sofia", "Luca", "Giulia", "Alessandro", "Martina", "Davide", "Chiara",
+            "Francesco", "Anna", "Matteo", "Sara", "Lorenzo", "Elena", "Simone", "Valentina",
+            "Andrea", "Laura", "Giovanni", "Francesca", "Riccardo", "Elisa", "Tommaso", "Giorgia"
+        ];
+        
+        const suffixes = [
+            "Player", "Gamer", "Pro", "Master", "Champion", "Hero", "Warrior", "King",
+            "Queen", "Legend", "Boss", "Ninja", "Pirata", "Cacciatore", "Esploratore", "Avventuriero"
+        ];
+        
+        const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+        const suffix = suffixes[Math.floor(Math.random() * suffixes.length)];
+        
+        const nickname = `${firstName}${suffix}`;
+        
+        // Salva il nickname nel localStorage per mantenerlo tra le sessioni
+        localStorage.setItem('playerNickname', nickname);
+        
+        return nickname;
     }
 
     connect() {

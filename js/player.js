@@ -66,23 +66,22 @@ class Player {
     }
 
     getMinecraftName() {
-        // Nomi ispirati a Minecraft
-        const prefixes = [
-            "Steve", "Alex", "Creeper", "Enderman", "Zombie", "Skeleton", 
-            "Villager", "Miner", "Digger", "Crafter", "Builder", "Diamond", 
-            "Gold", "Iron", "Emerald", "Redstone", "Obsidian", "Lava"
+        // Nomi italiani per i giocatori
+        const firstNames = [
+            "Marco", "Sofia", "Luca", "Giulia", "Alessandro", "Martina", "Davide", "Chiara",
+            "Francesco", "Anna", "Matteo", "Sara", "Lorenzo", "Elena", "Simone", "Valentina",
+            "Andrea", "Laura", "Giovanni", "Francesca", "Riccardo", "Elisa", "Tommaso", "Giorgia"
         ];
         
         const suffixes = [
-            "Master", "Pro", "Noob", "King", "Queen", "Lord", "Hunter", 
-            "Slayer", "Warrior", "Knight", "Mage", "Archer", "Explorer", 
-            "Adventurer", "Seeker", "Finder", "Collector", "Destroyer"
+            "Pro", "Gamer", "Master", "Player", "Champion", "Hero", "Warrior", "King",
+            "Queen", "Legend", "Boss", "Ninja", "Pirata", "Cacciatore", "Esploratore", "Avventuriero"
         ];
         
-        const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+        const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
         const suffix = suffixes[Math.floor(Math.random() * suffixes.length)];
         
-        return prefix + suffix;
+        return `${firstName}${suffix}`;
     }
 
     createMinecraftAvatar() {
