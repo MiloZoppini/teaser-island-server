@@ -23,7 +23,13 @@ class GameSocket {
 
     connect() {
         console.log('Attempting to connect to server...');
-        this.socket = io('http://localhost:3000');
+        
+        // Usa l'URL di produzione su Render.com o localhost per lo sviluppo locale
+        const serverUrl = window.location.hostname === 'localhost' 
+            ? 'http://localhost:3000' 
+            : window.location.origin;
+            
+        this.socket = io(serverUrl);
         
         // Gestione degli eventi di connessione
         this.socket.on('connect', () => {

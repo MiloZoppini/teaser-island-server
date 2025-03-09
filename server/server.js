@@ -359,7 +359,7 @@ function startMatch() {
 const PORT = process.env.PORT || 3000;
 
 // Gestione degli errori del server
-const server = http.listen(PORT, () => {
+const server = http.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     // Initialize treasure position
     gameState.treasure.position = getRandomPosition();
