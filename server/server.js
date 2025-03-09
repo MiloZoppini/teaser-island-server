@@ -309,8 +309,17 @@ io.on('connection', (socket) => {
  * @param {string} playerId - ID del giocatore
  */
 function handleMatchmaking(socket, playerId) {
+    // Ottieni il giocatore dal gameState
     const player = gameState.players.get(playerId);
-    const nickname = player.nickname; // Usa il nome generato in precedenza
+    
+    if (!player) {
+        console.error(`Giocatore ${playerId} non trovato nel gameState`);
+        return;
+    }
+    
+    const nickname = player.nickname;
+    
+    console.log(`Gestione matchmaking per ${nickname} (${playerId})`);
     
     // Aggiungi il giocatore alla lobby
     gameState.lobby.players.set(playerId, {
@@ -329,7 +338,10 @@ function handleMatchmaking(socket, playerId) {
     
     // Se ci sono abbastanza giocatori, avvia una partita
     if (gameState.lobby.players.size >= gameState.lobby.minPlayers) {
+        console.log(`Avvio partita con ${gameState.lobby.players.size} giocatori`);
         startMatch();
+    } else {
+        console.log(`In attesa di altri giocatori. Attualmente: ${gameState.lobby.players.size}/${gameState.lobby.minPlayers}`);
     }
 }
 
@@ -597,10 +609,15 @@ function startMatch() {
     for (const [playerId, playerData] of gameState.lobby.players.entries()) {
         if (i >= gameState.lobby.maxPlayers) break;
         
+        // Ottieni il nickname dal gameState o usa un fallback
+        const nickname = gameState.players.get(playerId)?.nickname || 
+                         playerData.nickname || 
+                         `player-${playerId.slice(0, 5)}`;
+        
         matchPlayers.set(playerId, {
             socket: io.sockets.sockets.get(playerId), // Recupera il socket direttamente
             joinTime: playerData.joinTime,
-            nickname: playerData.nickname || `player-${playerId.slice(0, 5)}`, // Usa il nickname dalla lobby o genera uno
+            nickname: nickname,
             score: 0, // Inizializza il punteggio
             position: { x: 0, y: 0, z: 0 }, // Posizione iniziale
             rotation: { x: 0, y: 0, z: 0 }, // Rotazione iniziale
@@ -643,6 +660,7 @@ function startMatch() {
     });
     
     console.log(`Nuova partita creata: ${matchId} con ${matchPlayers.size} giocatori`);
+    console.log('Giocatori nella partita:', Array.from(matchPlayers.keys()));
     
     // Genera posizioni casuali per i giocatori
     const playerPositions = {};
@@ -706,6 +724,9 @@ function startMatch() {
     // Invia l'evento di inizio partita a tutti i giocatori
     for (const [playerId, playerData] of matchPlayers.entries()) {
         try {
+            // Salta i bot
+            if (playerData.isBot) continue;
+            
             // Recupera il socket direttamente da io.sockets.sockets
             const socket = io.sockets.sockets.get(playerId);
             
@@ -726,6 +747,7 @@ function startMatch() {
                 socket.join(matchId);
                 
                 console.log(`Evento matchStart inviato al giocatore ${playerData.nickname} (${playerId})`);
+                console.log(`Dati inviati: ${matchPlayers.size} giocatori, ${treasurePositions.length} tesori`);
             } else {
                 console.error(`Socket non trovato per il giocatore ${playerId}`);
                 // Rimuovi il giocatore dalla partita se il socket non è valido

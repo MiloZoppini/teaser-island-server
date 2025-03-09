@@ -1,5 +1,5 @@
 class Player {
-    constructor(scene, position = { x: 0, y: 0, z: 0 }, isLocalPlayer = false, nickname = null) {
+    constructor(scene, position = { x: 0, y: 0, z: 0 }, isLocalPlayer = false, playerName = 'Sconosciuto') {
         this.scene = scene;
         this.isLocalPlayer = isLocalPlayer;
         this.moveSpeed = 0.08; // Ridotta da 0.15 a 0.08 per una camminata più lenta
@@ -17,8 +17,8 @@ class Player {
         this.loaded = false;
         this.playerColor = this.isLocalPlayer ? 0x00ff00 : this.getRandomPlayerColor(); // Verde per il giocatore locale, colore casuale per gli altri
         
-        // Usa il nickname fornito o genera un nome casuale
-        this.playerName = nickname || (this.isLocalPlayer ? "Tu" : this.getMinecraftName());
+        // Usa il nome fornito
+        this.playerName = playerName;
         
         console.log(`Creazione giocatore ${this.playerName} in posizione:`, position, `isLocalPlayer: ${isLocalPlayer}`);
         

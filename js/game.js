@@ -756,9 +756,8 @@ class Game {
     setupSocketHandlers() {
         // Gestione degli eventi del socket
         this.gameSocket.onPlayerJoined = (id, position, nickname) => {
-            console.log(`Player joined: ${id}, nickname: ${nickname}`);
+            console.log(`Player joined: ${id}, nickname: ${nickname}, position:`, position);
             if (!this.players.has(id)) {
-                // Se siamo in lobby, non creiamo ancora i giocatori remoti
                 if (!this.inLobby || id === this.gameSocket.playerId) {
                     this.addPlayer(id, position, id === this.gameSocket.playerId, nickname);
                     if (id === this.gameSocket.playerId) {
@@ -918,7 +917,9 @@ class Game {
         
         // Aggiungi un handler per l'evento di inizio partita
         this.gameSocket.onMatchStart = (data) => {
-            console.log(`Match started: ${data.matchId}, Players: ${JSON.stringify(data.players)}`);
+            console.log(`Match started: ${data.matchId}, Players:`, data.players);
+            console.log('Posizioni dei giocatori:', data.positions);
+            console.log('Nickname dei giocatori:', data.nicknames);
             
             this.matchId = data.matchId;
             
@@ -947,7 +948,7 @@ class Game {
             // Ottieni il nickname del giocatore locale
             const localPlayerNickname = data.nicknames ? 
                 data.nicknames[this.gameSocket.playerId] : 
-                this.gameSocket.playerNickname;
+                this.gameSocket.playerNickname || 'Tu';
             
             console.log(`Aggiungo giocatore locale ${this.gameSocket.playerId} (${localPlayerNickname}) in posizione:`, startPosition);
             this.addPlayer(this.gameSocket.playerId, startPosition, true, localPlayerNickname);
@@ -1051,14 +1052,15 @@ class Game {
             `Vincitore: ${winner === this.gameSocket.playerId ? 'Tu' : 'Giocatore ' + winner} con ${maxScore} tesori!`;
     }
 
-    addPlayer(id, position, isLocalPlayer, nickname = null) {
-        console.log(`Adding player ${id}, isLocalPlayer: ${isLocalPlayer}, nickname: ${nickname}`);
+    addPlayer(id, position, isLocalPlayer = false, nickname = 'Sconosciuto') {
+        console.log(`Aggiungo giocatore ${id} (${nickname}) in posizione:`, position);
         const player = new Player(this.scene, position, isLocalPlayer, nickname);
         this.players.set(id, player);
         if (isLocalPlayer) {
             this.localPlayer = player;
-            console.log('Local player initialized:', this.localPlayer);
+            this.localPlayer.score = 0;
         }
+        this.updateScoresTable();
     }
 
     removePlayer(id) {
