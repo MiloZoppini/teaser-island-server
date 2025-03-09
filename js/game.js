@@ -776,8 +776,10 @@ class Game {
         this.gameSocket.onPlayerMoved = (id, position, rotation) => {
             const player = this.players.get(id);
             if (player && !player.isLocalPlayer) {
+                // Evita di loggare ogni movimento per non intasare la console
+                // console.log(`Aggiornamento movimento per ${id}:`, position, rotation);
                 player.setPosition(position);
-                player.setRotation(rotation);
+                player.setRotation(rotation || { x: 0, y: 0, z: 0 });
             }
         };
 

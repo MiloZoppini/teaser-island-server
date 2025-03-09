@@ -110,7 +110,14 @@ class GameSocket {
 
         this.socket.on('playerMoved', (data) => {
             // Non logghiamo ogni movimento per evitare spam nella console
-            if (this.onPlayerMoved) this.onPlayerMoved(data.id, data.position, data.rotation);
+            if (this.onPlayerMoved) {
+                // Verifica che i dati siano validi
+                if (data && data.id && data.position) {
+                    this.onPlayerMoved(data.id, data.position, data.rotation);
+                } else {
+                    console.warn('Ricevuti dati di movimento non validi:', data);
+                }
+            }
         });
 
         this.socket.on('playerLeft', (id) => {

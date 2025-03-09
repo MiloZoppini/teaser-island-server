@@ -742,7 +742,18 @@ class Player {
     }
 
     setPosition(position) {
-        this.model.position.copy(position);
+        if (!position) return;
+        
+        // Verifica che la posizione sia valida
+        if (typeof position !== 'object' || position === null) {
+            console.error('Posizione non valida:', position);
+            return;
+        }
+        
+        // Aggiorna solo le proprietà definite
+        if (position.x !== undefined) this.model.position.x = position.x;
+        if (position.y !== undefined) this.model.position.y = position.y;
+        if (position.z !== undefined) this.model.position.z = position.z;
         
         // Aggiorna la camera se è un giocatore locale
         if (this.isLocalPlayer && this.camera) {
@@ -751,7 +762,18 @@ class Player {
     }
 
     setRotation(rotation) {
-        this.model.rotation.copy(rotation);
+        if (!rotation) return;
+        
+        // Verifica che la rotazione sia valida
+        if (typeof rotation !== 'object' || rotation === null) {
+            console.error('Rotazione non valida:', rotation);
+            return;
+        }
+        
+        // Aggiorna solo le proprietà definite
+        if (rotation.x !== undefined) this.model.rotation.x = rotation.x;
+        if (rotation.y !== undefined) this.model.rotation.y = rotation.y;
+        if (rotation.z !== undefined) this.model.rotation.z = rotation.z;
     }
 
     getPosition() {
