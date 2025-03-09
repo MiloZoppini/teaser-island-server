@@ -382,7 +382,13 @@ function startMatch() {
     for (const [playerId, playerData] of gameState.lobby.players.entries()) {
         if (i >= gameState.lobby.maxPlayers) break;
         
-        matchPlayers.set(playerId, playerData);
+        matchPlayers.set(playerId, {
+            socket: io.sockets.sockets.get(playerId), // Recupera il socket direttamente
+            joinTime: playerData.joinTime,
+            score: 0, // Inizializza il punteggio
+            position: { x: 0, y: 0, z: 0 }, // Posizione iniziale
+            rotation: { x: 0, y: 0, z: 0 } // Rotazione iniziale
+        });
         gameState.lobby.players.delete(playerId);
         i++;
     }
@@ -437,40 +443,42 @@ function startMatch() {
     // Invia l'evento di inizio partita a tutti i giocatori
     for (const [playerId, playerData] of matchPlayers.entries()) {
         try {
-            // Verifica che playerData.socket sia un oggetto socket valido
-            if (playerData && playerData.socket && typeof playerData.socket.emit === 'function') {
+            // Recupera il socket direttamente da io.sockets.sockets
+            const socket = io.sockets.sockets.get(playerId);
+            
+            if (socket && typeof socket.emit === 'function') {
                 // Imposta il matchId nel socket
-                playerData.socket.matchId = matchId;
+                socket.matchId = matchId;
                 
                 // Invia l'evento di inizio partita
-                playerData.socket.emit('matchStart', {
+                socket.emit('matchStart', {
                     matchId,
                     players: Array.from(matchPlayers.keys()),
                     positions: playerPositions,
                     treasures: treasurePositions
                 });
                 
+                // Fai entrare il socket nella room della partita
+                socket.join(matchId);
+                
                 console.log(`Evento matchStart inviato al giocatore ${playerId}`);
             } else {
-                console.error(`Socket non valido per il giocatore ${playerId}`);
-                
-                // Tenta di recuperare il socket dalla mappa dei socket connessi
-                const socket = io.sockets.sockets.get(playerId);
-                if (socket && typeof socket.emit === 'function') {
-                    socket.matchId = matchId;
-                    socket.emit('matchStart', {
-                        matchId,
-                        players: Array.from(matchPlayers.keys()),
-                        positions: playerPositions,
-                        treasures: treasurePositions
-                    });
-                    console.log(`Evento matchStart inviato al giocatore ${playerId} (recuperato)`);
-                } else {
-                    console.error(`Impossibile recuperare il socket per il giocatore ${playerId}`);
+                console.error(`Socket non trovato per il giocatore ${playerId}`);
+                // Rimuovi il giocatore dalla partita se il socket non è valido
+                matchPlayers.delete(playerId);
+                if (matchPlayers.size === 0) {
+                    gameState.matches.delete(matchId);
+                    console.log(`Partita ${matchId} annullata: nessun giocatore valido`);
                 }
             }
         } catch (error) {
             console.error(`Errore nell'invio dell'evento matchStart al giocatore ${playerId}:`, error);
+            // Rimuovi il giocatore dalla partita in caso di errore
+            matchPlayers.delete(playerId);
+            if (matchPlayers.size === 0) {
+                gameState.matches.delete(matchId);
+                console.log(`Partita ${matchId} annullata: nessun giocatore valido`);
+            }
         }
     }
     
@@ -501,32 +509,62 @@ function endMatch(matchId, reason) {
     let winnerId = null;
     let maxScore = -1;
     
-    for (const [playerId, score] of match.scores.entries()) {
+    // Crea un oggetto con i punteggi finali
+    const finalScores = {};
+    
+    for (const [playerId, playerData] of match.players.entries()) {
+        const score = playerData.score || 0;
+        finalScores[playerId] = score;
+        
         if (score > maxScore) {
             maxScore = score;
             winnerId = playerId;
         }
     }
     
+    console.log(`Partita ${matchId} terminata. Vincitore: ${winnerId || 'nessuno'} con ${maxScore} punti`);
+    console.log('Punteggi finali:', finalScores);
+    
     // Invia l'evento di fine partita a tutti i giocatori
-    for (const [playerId, socket] of match.players.entries()) {
-        socket.emit('gameOver', {
-            winnerId,
-            scores: Object.fromEntries(match.scores),
-            reason
-        });
-        
-        // Reimposta il socket per una nuova partita
-        socket.matchId = null;
-        
-        // Rimetti il giocatore nella lobby
-        gameState.lobby.players.set(playerId, socket);
+    for (const [playerId, playerData] of match.players.entries()) {
+        try {
+            // Recupera il socket direttamente
+            const socket = io.sockets.sockets.get(playerId);
+            
+            if (socket && typeof socket.emit === 'function') {
+                // Invia l'evento gameOver
+                socket.emit('gameOver', {
+                    winnerId,
+                    scores: finalScores,
+                    reason
+                });
+                
+                // Rimuovi il socket dalla room della partita
+                socket.leave(matchId);
+                
+                // Reimposta il matchId del socket
+                socket.matchId = null;
+                
+                // Rimetti il giocatore nella lobby
+                gameState.lobby.players.set(playerId, {
+                    joinTime: Date.now(),
+                    socket: socket
+                });
+                
+                console.log(`Giocatore ${playerId} rimesso nella lobby`);
+            } else {
+                console.error(`Socket non trovato per il giocatore ${playerId} durante la fine della partita`);
+            }
+        } catch (error) {
+            console.error(`Errore nell'invio dell'evento gameOver al giocatore ${playerId}:`, error);
+        }
     }
     
     // Rimuovi la partita dalla mappa
     gameState.matches.delete(matchId);
     
-    console.log(`Partita ${matchId} terminata. Vincitore: ${winnerId || 'nessuno'}`);
+    // Aggiorna la lobby
+    broadcastLobbyUpdate();
     
     // Aggiorna il contatore dei giocatori online
     broadcastOnlinePlayersCount();
