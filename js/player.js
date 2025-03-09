@@ -473,7 +473,7 @@ class Player {
             this.verticalAngle -= event.movementY * sensitivity;
             
             // Limita la rotazione verticale per evitare che la camera si capovolga
-            const maxVerticalAngle = Math.PI / 3; // 60 gradi
+            const maxVerticalAngle = Math.PI / 2.5; // Aumentato a circa 72 gradi
             this.verticalAngle = Math.max(-maxVerticalAngle, Math.min(maxVerticalAngle, this.verticalAngle));
             
             // Applica la rotazione verticale alla camera
@@ -665,18 +665,18 @@ class Player {
         if (isMoving) {
             const time = Date.now() * 0.001;
             const bobFrequency = this.isRunning ? 8 : 5; // Frequenza più alta durante la corsa
-            const bobAmplitude = this.isRunning ? 0.03 : 0.015; // Ampiezza maggiore durante la corsa
+            const bobAmplitude = this.isRunning ? 0.02 : 0.01; // Ampiezza ridotta
             
-            // Oscillazione verticale (su e giù) - più sottile
+            // Oscillazione verticale (su e giù)
             const verticalBob = Math.sin(time * bobFrequency) * bobAmplitude;
             this.camera.position.y = 2.7 + verticalBob;
             
-            // Leggera oscillazione laterale (destra e sinistra) - più sottile
-            const lateralBob = Math.cos(time * bobFrequency * 0.5) * bobAmplitude * 0.3;
+            // Oscillazione laterale (destra e sinistra) - ridotta
+            const lateralBob = Math.cos(time * bobFrequency * 0.5) * bobAmplitude * 0.2;
             this.camera.position.x = lateralBob;
             
-            // Leggera inclinazione della testa - più sottile
-            const tiltAngle = Math.sin(time * bobFrequency * 0.5) * 0.003;
+            // Inclinazione della testa - ridotta
+            const tiltAngle = Math.sin(time * bobFrequency * 0.5) * 0.002;
             this.camera.rotation.z = tiltAngle;
         } else {
             // Ripristina la posizione della camera quando il giocatore è fermo
