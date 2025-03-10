@@ -4,7 +4,7 @@ class Game {
         window.game = this;
         
         this.players = new Map();
-        this.gameSocket = new GameSocket();
+        this.socket = null;
         this.clock = new THREE.Clock();
         this.loadedModels = {}; // Per memorizzare i modelli caricati
         this.isCollectingTreasure = false; // Flag per evitare eventi multipli di raccolta
@@ -16,28 +16,25 @@ class Game {
         this.gameTime = 300; // Tempo di gioco in secondi (5 minuti)
         this.gameTimer = null; // Timer per il countdown
         
-        // Elementi UI
-        this.lobbyScreen = document.getElementById('lobby-screen');
-        this.playersCount = document.getElementById('players-count');
-        this.maxPlayers = document.getElementById('max-players');
-        this.lobbyProgress = document.getElementById('lobby-progress');
-        this.lobbyStatus = document.getElementById('lobby-status');
+        // Inizializza l'UI Manager
+        this.ui = new UIManager();
         
-        // Crea l'HUD del gioco
-        this.createGameHUD();
-        
+        // Inizializza la scena
         this.setupScene();
-        this.setupLights();
+        
+        // Carica i modelli
         this.loadModels(() => {
+            // Crea l'isola
             this.createIsland();
+            
+            // Configura i gestori degli eventi Socket.IO
             this.setupSocketHandlers();
-            this.setupGameTimer();
             
-            // Crea un giocatore locale temporaneo per esplorare l'isola durante l'attesa
-            this.createLocalPlayerForLobby();
-            
+            // Avvia il loop di animazione
             this.animate();
-            console.log('Game initialized successfully');
+            
+            // Crea un giocatore temporaneo per la lobby
+            this.createLocalPlayerForLobby();
         });
     }
 
@@ -1036,20 +1033,34 @@ class Game {
         }, 1000);
     }
 
-    endGame() {
-        clearInterval(this.gameTimer);
-        document.getElementById('game-over').classList.remove('hidden');
-        // Trova il vincitore
-        let maxScore = 0;
+    endGame(data) {
+        this.gameStarted = false;
+        
+        // Trova il giocatore con il punteggio più alto
+        let maxScore = -1;
         let winner = null;
+        
         this.players.forEach((player, id) => {
             if (player.score > maxScore) {
                 maxScore = player.score;
                 winner = id;
             }
         });
-        document.getElementById('winner-text').textContent = 
-            `Vincitore: ${winner === this.socket.playerId ? 'Tu' : 'Giocatore ' + winner} con ${maxScore} tesori!`;
+        
+        // Prepara i dati per la schermata di fine partita
+        const gameOverData = {
+            winnerName: this.players.get(winner)?.playerName || 'Sconosciuto',
+            winnerScore: maxScore,
+            reason: data?.reason || 'Tempo scaduto'
+        };
+        
+        // Mostra la schermata di fine partita
+        this.ui.showGameOver(gameOverData);
+        
+        // Resetta il gioco dopo 5 secondi
+        setTimeout(() => {
+            this.resetGame();
+        }, 5000);
     }
 
     addPlayer(id, position, isLocalPlayer = false, nickname = 'Sconosciuto') {
@@ -1382,90 +1393,28 @@ class Game {
      * Mostra un messaggio quando un tesoro viene raccolto
      */
     showTreasureMessage(treasureType, points) {
-        // Crea un elemento per il messaggio
-        const messageElement = document.createElement('div');
-        messageElement.style.position = 'absolute';
-        messageElement.style.top = '50%';
-        messageElement.style.left = '50%';
-        messageElement.style.transform = 'translate(-50%, -50%)';
-        messageElement.style.padding = '20px';
-        messageElement.style.borderRadius = '10px';
-        messageElement.style.fontFamily = 'Arial, sans-serif';
-        messageElement.style.fontSize = '24px';
-        messageElement.style.fontWeight = 'bold';
-        messageElement.style.textAlign = 'center';
-        messageElement.style.zIndex = '1000';
-        messageElement.style.opacity = '0';
-        messageElement.style.transition = 'opacity 0.5s';
-        
-        // Imposta stile e messaggio in base al tipo di tesoro
-        let message, color, backgroundColor;
-        
-        switch(treasureType) {
-            case 'blue':
-                message = `Tesoro Blu! +${points} punti`;
-                color = 'white';
-                backgroundColor = 'rgba(0, 100, 255, 0.8)';
-                break;
-            case 'red':
-                message = `Tesoro Rosso! ${points} punti`;
-                color = 'white';
-                backgroundColor = 'rgba(255, 50, 50, 0.8)';
-                break;
-            case 'normal':
-            default:
-                message = `Tesoro! +${points} punti`;
-                color = 'black';
-                backgroundColor = 'rgba(255, 215, 0, 0.8)';
-                break;
-        }
-        
-        messageElement.textContent = message;
-        messageElement.style.color = color;
-        messageElement.style.backgroundColor = backgroundColor;
-        
-        // Aggiungi il messaggio al DOM
-        document.body.appendChild(messageElement);
-        
-        // Mostra il messaggio con una transizione
-        setTimeout(() => {
-            messageElement.style.opacity = '1';
-        }, 10);
-        
-        // Rimuovi il messaggio dopo 2 secondi
-        setTimeout(() => {
-            messageElement.style.opacity = '0';
-            setTimeout(() => {
-                document.body.removeChild(messageElement);
-            }, 500);
-        }, 2000);
+        // Mostra il messaggio del tesoro nell'UI
+        this.ui.showTreasureMessage(treasureType, points);
     }
     
     // Funzione per iniziare la partita
     startGame() {
-        console.log('Partita iniziata!');
         this.gameStarted = true;
         this.inLobby = false;
         
         // Nascondi la schermata della lobby
-        if (this.lobbyScreen) {
-            this.lobbyScreen.style.display = 'none';
+        this.ui.hideLobby();
+        
+        // Mostra una notifica
+        this.ui.showNotification('Partita iniziata!', 'success', 3000);
+        
+        // Imposta la salute del giocatore
+        if (this.localPlayer) {
+            this.ui.updateHealth(100);
         }
         
-        // Mostra l'HUD del gioco
-        if (this.hud) {
-            this.hud.style.display = 'block';
-        }
-        
-        // Resetta il timer
-        this.gameTime = 300;
-        this.updateGameTimer();
-        
-        // Aggiorna la tabella dei punteggi
+        // Aggiorna la classifica
         this.updateScoresTable();
-        
-        // Altre operazioni di inizializzazione del gioco
-        // ...
     }
     
     // Funzione per resettare lo stato del gioco
@@ -1533,26 +1482,16 @@ class Game {
     updateGameTimer() {
         if (!this.gameStarted) return;
         
-        // Calcola minuti e secondi
-        const minutes = Math.floor(this.gameTime / 60);
-        const seconds = this.gameTime % 60;
+        const currentTime = Date.now();
+        const elapsedTime = currentTime - this.gameStartTime;
+        const remainingTime = Math.max(0, this.gameTime * 1000 - elapsedTime);
         
-        // Formatta il tempo
-        const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        // Aggiorna il timer nell'UI
+        this.ui.updateTimer(remainingTime);
         
-        // Aggiorna l'elemento del timer
-        const timerSpan = this.timerElement.querySelector('span');
-        if (timerSpan) {
-            timerSpan.textContent = formattedTime;
-        }
-        
-        // Cambia il colore quando il tempo sta per scadere
-        if (this.gameTime <= 30) {
-            timerSpan.style.color = 'red';
-        } else if (this.gameTime <= 60) {
-            timerSpan.style.color = 'orange';
-        } else {
-            timerSpan.style.color = 'white';
+        // Se il tempo è scaduto, termina la partita
+        if (remainingTime <= 0) {
+            this.endGame();
         }
     }
 
@@ -1560,47 +1499,23 @@ class Game {
      * Aggiorna la tabella dei punteggi
      */
     updateScoresTable() {
-        if (!this.gameStarted) return;
-        
-        // Crea un array di giocatori con i loro punteggi
-        const playerScores = [];
+        // Prepara i dati dei giocatori per la classifica
+        const playersData = [];
         
         this.players.forEach((player, id) => {
-            playerScores.push({
+            playersData.push({
                 id: id,
-                name: player.playerName,
-                score: player.score || 0,
-                isLocal: player.isLocalPlayer
+                name: player.playerName || 'Sconosciuto',
+                score: player.score || 0
             });
         });
         
-        // Ordina i giocatori per punteggio (decrescente)
-        playerScores.sort((a, b) => b.score - a.score);
+        // Aggiorna la classifica nell'UI
+        this.ui.updateLeaderboard(playersData);
         
-        // Crea la tabella HTML
-        let tableHTML = '<table style="width: 100%; border-collapse: collapse;">';
-        tableHTML += '<tr><th style="text-align: left;">Giocatore</th><th style="text-align: right;">Punti</th></tr>';
-        
-        playerScores.forEach(player => {
-            const style = player.isLocal ? 'color: #00ff00;' : '';
-            tableHTML += `<tr style="${style}">
-                <td style="padding: 2px 5px;">${player.name}</td>
-                <td style="text-align: right; padding: 2px 5px;">${player.score}</td>
-            </tr>`;
-        });
-        
-        tableHTML += '</table>';
-        
-        // Aggiorna la tabella
-        this.scoresTable.innerHTML = '<h3 style="margin: 0 0 5px 0;">Punteggi</h3>' + tableHTML;
-        
-        // Aggiorna anche il punteggio del giocatore locale
-        const localPlayer = Array.from(this.players.values()).find(p => p.isLocalPlayer);
-        if (localPlayer) {
-            const scoreSpan = this.scoreElement.querySelector('span');
-            if (scoreSpan) {
-                scoreSpan.textContent = localPlayer.score || 0;
-            }
+        // Aggiorna il punteggio del giocatore locale
+        if (this.localPlayer) {
+            this.ui.updateScore(this.localPlayer.score || 0);
         }
     }
 

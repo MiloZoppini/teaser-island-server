@@ -183,9 +183,9 @@ io.on('connection', (socket) => {
         
         if (gameState.players.has(playerId)) {
             const player = gameState.players.get(playerId);
-            player.position = data.position;
-            player.rotation = data.rotation;
-            
+                player.position = data.position;
+                player.rotation = data.rotation;
+                
             // Trova la partita del giocatore
             let matchId = null;
             gameState.matches.forEach((match, id) => {
@@ -491,17 +491,17 @@ function handleTreasureCollection(data) {
                 // Genera una nuova posizione per il tesoro
                 let newPosition;
                 try {
-                    if (data.position) {
+                if (data.position) {
                         // Verifica che la posizione sia valida
                         if (typeof data.position === 'object' && 'x' in data.position && 'z' in data.position) {
-                            // Usa la posizione inviata dal client per generare una posizione lontana
+                    // Usa la posizione inviata dal client per generare una posizione lontana
                             newPosition = getPositionFarFrom([data.position], 30);
                         } else {
                             // Fallback a una posizione casuale
                             newPosition = getRandomPosition();
                         }
-                    } else {
-                        // Fallback a una posizione casuale
+                } else {
+                    // Fallback a una posizione casuale
                         newPosition = getRandomPosition();
                     }
                 } catch (error) {

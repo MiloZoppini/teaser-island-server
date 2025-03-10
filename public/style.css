@@ -298,52 +298,49 @@ body {
     position: fixed;
     top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%);
-    background-color: rgba(0, 0, 0, 0.7);
+    transform: translate(-50%, -50%) scale(0);
+    background: rgba(0, 0, 0, 0.8);
     color: white;
-    padding: 15px 25px;
+    padding: 20px;
     border-radius: 10px;
-    font-size: 24px;
-    font-weight: bold;
-    text-align: center;
-    z-index: 1000;
-    animation: pop-in 0.3s ease-out;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    font-size: 24px;
+    z-index: 1000;
+    animation: pop-in 0.5s forwards;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
 }
 
 .treasure-message.normal {
-    border: 2px solid gold;
+    border: 2px solid #ffd700;
 }
 
-.treasure-message.bonus {
-    border: 2px solid #00aaff;
+.treasure-message.blue {
+    border: 2px solid #4287f5;
 }
 
-.treasure-message.malus {
-    border: 2px solid #ff3333;
+.treasure-message.red {
+    border: 2px solid #f54242;
 }
 
 .treasure-message .treasure-icon {
     font-size: 32px;
-    margin-right: 10px;
+    margin-right: 15px;
 }
 
 .treasure-message .points {
-    font-size: 28px;
-    margin-left: 10px;
+    font-weight: bold;
 }
 
 .treasure-message.fade-out {
-    animation: fade-out 0.5s ease-out forwards;
+    animation: fade-out 1s forwards;
 }
 
 @keyframes pop-in {
-    0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
-    70% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
-    100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    0% { transform: translate(-50%, -50%) scale(0); }
+    70% { transform: translate(-50%, -50%) scale(1.1); }
+    100% { transform: translate(-50%, -50%) scale(1); }
 }
 
 @keyframes fade-out {
@@ -354,27 +351,38 @@ body {
 /* Stili per il contatore dei giocatori online */
 #online-players-indicator {
     position: fixed;
-    bottom: 10px;
-    left: 10px;
-    background-color: rgba(0, 0, 0, 0.6);
+    bottom: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.8);
     color: white;
-    padding: 5px 10px;
+    padding: 10px 15px;
     border-radius: 5px;
     font-size: 14px;
-    z-index: 100;
+    z-index: 900;
     display: flex;
     align-items: center;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
-#online-players-indicator::before {
-    content: "👥";
-    margin-right: 5px;
-    font-size: 16px;
+.online-players-indicator::before {
+    content: '🟢';
+    margin-right: 8px;
 }
 
-#online-players-count-hud {
+.online-players-count {
     font-weight: bold;
-    color: #00ff00;
+    color: #4CAF50;
+    margin-left: 5px;
+}
+
+.online-players-count.pulse {
+    animation: pulse 0.5s ease;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
 }
 
 /* Classe per nascondere elementi */
@@ -403,4 +411,179 @@ body {
     background-color: rgba(0, 0, 0, 0.9);
     border-color: #ffcc00;
     transform: scale(1.05);
+}
+
+/* Stili per i nuovi componenti UI */
+
+/* Notifiche */
+.notifications-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    width: 300px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.notification {
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 15px;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transform: translateX(120%);
+    transition: transform 0.3s ease;
+    position: relative;
+    border-left: 4px solid #4CAF50;
+}
+
+.notification.show {
+    transform: translateX(0);
+}
+
+.notification.hide {
+    transform: translateX(120%);
+}
+
+.notification-icon {
+    margin-right: 10px;
+    font-size: 20px;
+}
+
+.notification-content {
+    flex: 1;
+}
+
+.notification-close {
+    cursor: pointer;
+    font-size: 20px;
+    margin-left: 10px;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.notification-close:hover {
+    opacity: 1;
+}
+
+.notification-success {
+    border-left-color: #4CAF50;
+}
+
+.notification-warning {
+    border-left-color: #FF9800;
+}
+
+.notification-error {
+    border-left-color: #F44336;
+}
+
+.notification-info {
+    border-left-color: #2196F3;
+}
+
+/* Classifica */
+.scoreboard-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 15px;
+    border-radius: 5px;
+    width: 300px;
+    z-index: 900;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.scoreboard-title {
+    text-align: center;
+    margin-bottom: 10px;
+    color: #4CAF50;
+    font-size: 18px;
+}
+
+.scoreboard-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.scoreboard-table th,
+.scoreboard-table td {
+    padding: 8px;
+    text-align: left;
+}
+
+.scoreboard-table th {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    color: #aaa;
+    font-weight: normal;
+    font-size: 14px;
+}
+
+.scoreboard-table .rank-cell {
+    width: 30px;
+    text-align: center;
+}
+
+.scoreboard-table .score-cell {
+    width: 60px;
+    text-align: right;
+}
+
+.scoreboard-table tr.local-player {
+    background: rgba(76, 175, 80, 0.2);
+}
+
+.player-icon {
+    margin-right: 5px;
+}
+
+/* Lista giocatori */
+.players-list-container {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 15px;
+    border-radius: 5px;
+    width: 200px;
+    z-index: 900;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.players-list-container h3 {
+    margin-bottom: 10px;
+    color: #4CAF50;
+    font-size: 16px;
+}
+
+.players-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.player-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.player-item:last-child {
+    border-bottom: none;
+}
+
+.player-name {
+    flex: 1;
+}
+
+.player-score {
+    font-weight: bold;
 } 
