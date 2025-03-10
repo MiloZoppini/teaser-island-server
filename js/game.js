@@ -754,306 +754,270 @@ class Game {
     }
 
     setupSocketHandlers() {
-        // Gestione degli eventi del socket
-        this.gameSocket.onPlayerJoined = (data) => {
-            console.log('onPlayerJoined ricevuto:', data);
+        // Inizializza la connessione Socket.IO
+        this.socket = new GameSocket();
+        
+        // Imposta i callback per gli eventi Socket.IO
+        this.socket.onPlayerJoined = (data) => {
+            console.log('Giocatore entrato:', data);
             
-            // Estrai i dati del giocatore
-            const id = typeof data === 'object' ? data.id : data;
-            const position = typeof data === 'object' && data.position ? data.position : { x: 0, y: 0, z: 0 };
-            const nickname = typeof data === 'object' && data.nickname ? data.nickname : 'Sconosciuto';
-            
-            console.log(`Player joined: ${id}, nickname: ${nickname}, position:`, position);
-            
-            // Aggiungi il giocatore solo se non esiste già e non siamo in lobby
-            if (!this.players.has(id) && !this.inLobby) {
-                const adjustedPosition = {
-                    x: position.x,
-                    y: this.getTerrainHeight(position.x, position.z) + 1,
-                    z: position.z
-                };
-                
-                console.log(`Aggiungo giocatore remoto ${id} (${nickname}) in posizione:`, adjustedPosition);
-                this.addPlayer(id, adjustedPosition, id === this.gameSocket.playerId, nickname);
-            }
-        };
-
-        this.gameSocket.onPlayerLeft = (id) => {
-            console.log(`Player left: ${id}`);
-            this.removePlayer(id);
-        };
-
-        this.gameSocket.onPlayerMoved = (data) => {
-            // Estrai i dati del movimento
-            const id = typeof data === 'object' ? data.id : null;
-            const position = typeof data === 'object' && data.position ? data.position : null;
-            const rotation = typeof data === 'object' && data.rotation ? data.rotation : null;
-            
-            if (!id || !position) {
-                console.error('Dati di movimento non validi:', data);
+            // Verifica che i dati siano nel formato atteso
+            if (!data || !data.id) {
+                console.error('Dati del giocatore non validi:', data);
                 return;
             }
             
-            // Aggiorna la posizione del giocatore remoto
-            const player = this.players.get(id);
-            if (player && !player.isLocalPlayer) {
-                const adjustedPosition = {
-                    x: position.x,
-                    y: this.getTerrainHeight(position.x, position.z) + 1,
-                    z: position.z
-                };
+            // Verifica se il giocatore è già presente
+            if (this.players.has(data.id)) {
+                console.log(`Giocatore ${data.id} già presente, aggiorno solo la posizione`);
+                const player = this.players.get(data.id);
+                if (data.position) {
+                    player.setPosition(data.position);
+                }
+                if (data.rotation) {
+                    player.setRotation(data.rotation);
+                }
+                return;
+            }
+            
+            // Aggiungi il giocatore alla scena
+            const position = data.position || { x: 0, y: 0, z: 0 };
+            const nickname = data.name || data.nickname || 'Sconosciuto';
+            
+            console.log(`Aggiungo giocatore remoto ${nickname} (${data.id}) in posizione:`, position);
+            
+            // Assicurati che la posizione tenga conto dell'altezza del terreno
+            if (position.y === 0) {
+                position.y = this.getTerrainHeight(position.x, position.z) + 1;
+            }
+            
+            this.addPlayer(data.id, position, false, nickname);
+        };
+        
+        this.socket.onPlayerLeft = (id) => {
+            console.log('Giocatore uscito:', id);
+            
+            // Verifica che l'ID sia valido
+            if (!id) {
+                console.error('ID del giocatore non valido:', id);
+                return;
+            }
+            
+            // Se l'ID è un oggetto, estrai l'ID
+            const playerId = typeof id === 'object' ? id.id : id;
+            
+            // Rimuovi il giocatore dalla scena
+            this.removePlayer(playerId);
+        };
+        
+        this.socket.onPlayerMoved = (data) => {
+            // Verifica che i dati siano nel formato atteso
+            if (!data || !data.id) {
+                return;
+            }
+            
+            // Aggiorna la posizione del giocatore
+            const player = this.players.get(data.id);
+            if (player) {
+                const position = data.position || { x: data.x, y: data.y, z: data.z };
+                const rotation = data.rotation;
                 
-                player.setPosition(adjustedPosition);
-                if (rotation) {
+                player.setPosition(position);
+                if (rotation !== undefined) {
                     player.setRotation(rotation);
                 }
             }
         };
-
-        this.gameSocket.onTreasureCollected = (playerId, position, type) => {
-            console.log(`Tesoro di tipo ${type} raccolto da ${playerId} in posizione:`, position);
+        
+        this.socket.onTreasureCollected = (playerId, position, type) => {
+            console.log('Tesoro raccolto:', playerId, position, type);
             
-            // Trova il giocatore che ha raccolto il tesoro
+            // Verifica che i dati siano nel formato atteso
+            if (!playerId || !position) {
+                console.error('Dati del tesoro non validi:', playerId, position, type);
+                return;
+            }
+            
+            // Crea un effetto visivo per la raccolta del tesoro
+            this.createTreasureCollectEffect(position, type);
+            
+            // Aggiorna il punteggio del giocatore
             const player = this.players.get(playerId);
-            
             if (player) {
-                // Calcola i punti in base al tipo di tesoro
-                let points = 1; // Valore predefinito per tesori normali
+                let points = 1; // Valore predefinito
                 
-                switch(type) {
-                    case 'blue': points = 2; break;
-                    case 'red': points = -1; break;
-                    case 'normal': default: points = 1; break;
+                // Assegna punti in base al tipo di tesoro
+                if (type === 'blue') {
+                    points = 3;
+                } else if (type === 'red') {
+                    points = 5;
                 }
                 
-                // Aggiorna il punteggio del giocatore
-                player.score = (player.score || 0) + points;
+                player.score += points;
                 
-                // Se è il giocatore locale, mostra un messaggio
-                if (player.isLocalPlayer) {
-                    this.showTreasureMessage(type, points);
-                    
-                    // Aggiorna il punteggio nell'HUD
-                    const scoreSpan = this.scoreElement.querySelector('span');
-                    if (scoreSpan) {
-                        scoreSpan.textContent = player.score;
-                    }
-                }
+                // Mostra un messaggio per il tesoro raccolto
+                this.showTreasureMessage(type, points);
                 
                 // Aggiorna la tabella dei punteggi
                 this.updateScoresTable();
+            }
+        };
+        
+        this.socket.onTreasureUpdate = (data) => {
+            console.log('Aggiornamento tesori:', data);
+            
+            // Verifica che i dati siano nel formato atteso
+            if (!data || !Array.isArray(data)) {
+                console.error('Dati dei tesori non validi:', data);
+                return;
+            }
+            
+            // Aggiorna i tesori nella scena
+            // Implementazione da completare in base alla struttura dei dati
+        };
+        
+        this.socket.onScoreUpdate = (playerId, score) => {
+            console.log('Aggiornamento punteggio:', playerId, score);
+            
+            // Verifica che i dati siano nel formato atteso
+            if (!playerId) {
+                console.error('ID del giocatore non valido:', playerId);
+                return;
+            }
+            
+            // Aggiorna il punteggio del giocatore
+            const player = this.players.get(playerId);
+            if (player) {
+                player.score = score;
                 
-                // Crea un effetto visivo nella posizione del tesoro
-                this.createTreasureCollectEffect(position, type);
-            }
-            
-            // Rimuovi il tesoro raccolto
-            for (let i = 0; i < this.treasures.length; i++) {
-                const treasure = this.treasures[i];
-                if (treasure && this.isSamePosition(treasure.getPosition(), position)) {
-                    treasure.dispose();
-                    this.treasures.splice(i, 1);
-                    break;
-                }
-            }
-            
-            // Genera un nuovo tesoro in una posizione casuale
-            const newPosition = this.generateRandomTreasurePosition();
-            const newType = this.getRandomTreasureType();
-            this.createTreasure(newPosition, newType);
-        };
-
-        this.gameSocket.onGameState = (data) => {
-            console.log('Game state received:', data);
-            
-            // Resetta il punteggio nell'interfaccia utente
-            document.getElementById('score').textContent = 'Tesori: 0';
-            
-            data.players.forEach(([id, playerData]) => {
-                if (!this.players.has(id)) {
-                    this.addPlayer(id, playerData.position, id === this.gameSocket.playerId, playerData.nickname);
-                    if (id === this.gameSocket.playerId) {
-                        console.log('Local player set:', this.localPlayer);
-                        // Assicurati che il punteggio del giocatore locale sia 0
-                        this.localPlayer.score = 0;
-                    }
-                } else {
-                    // Aggiorna il punteggio per i giocatori esistenti
-                    const player = this.players.get(id);
-                    if (player) {
-                        player.score = playerData.score || 0;
-                    }
-                }
-            });
-            if (!this.treasure) {
-                // Assicuriamoci che il tesoro sia posizionato sul terreno
-                const treasurePosition = data.treasure.position;
-                const treasureY = this.getTerrainHeight(treasurePosition.x, treasurePosition.z);
-                const adjustedPosition = {
-                    x: treasurePosition.x,
-                    y: treasureY,
-                    z: treasurePosition.z
-                };
-                this.treasure = new Treasure(this.scene, adjustedPosition);
-                console.log('Tesoro iniziale creato in posizione:', adjustedPosition);
-            } else {
-                // Assicuriamoci che il tesoro sia posizionato sul terreno
-                const treasurePosition = data.treasure.position;
-                const treasureY = this.getTerrainHeight(treasurePosition.x, treasurePosition.z);
-                const adjustedPosition = {
-                    x: treasurePosition.x,
-                    y: treasureY,
-                    z: treasurePosition.z
-                };
-                this.treasure.setPosition(adjustedPosition);
-            }
-        };
-
-        this.gameSocket.onGameOver = (winnerId) => {
-            console.log(`Game over. Winner: ${winnerId}`);
-            this.endGame(winnerId);
-        };
-        
-        // Gestione degli eventi di lobby e matchmaking
-        this.gameSocket.onLobbyUpdate = (playersCount, maxPlayers) => {
-            console.log(`Lobby update: ${playersCount}/${maxPlayers} players`);
-            
-            // Aggiorna l'interfaccia della lobby
-            document.getElementById('players-count').textContent = playersCount;
-            document.getElementById('max-players').textContent = maxPlayers;
-            
-            // Aggiorna la barra di progresso
-            const progressBar = document.getElementById('lobby-progress');
-            const progressPercentage = (playersCount / maxPlayers) * 100;
-            progressBar.style.width = `${progressPercentage}%`;
-            
-            // Mostra o nascondi la schermata della lobby
-            const lobbyScreen = document.getElementById('lobby-screen');
-            if (playersCount < maxPlayers) {
-                lobbyScreen.classList.remove('hidden');
-                document.getElementById('lobby-status').textContent = 'Esplora l\'isola mentre aspetti...';
-            } else {
-                document.getElementById('lobby-status').textContent = 'Partita in avvio...';
-                // Nascondi la lobby dopo 3 secondi
-                setTimeout(() => {
-                    lobbyScreen.classList.add('hidden');
-                    // Inizia la partita
-                    this.startGame();
-                }, 3000);
+                // Aggiorna la tabella dei punteggi
+                this.updateScoresTable();
             }
         };
         
-        // Aggiungi un handler per l'evento di inizio partita
-        this.gameSocket.onMatchStart = (data) => {
-            console.log(`Match started: ${data.matchId}`);
-            console.log('Players:', data.players);
-            console.log('Positions:', data.positions);
-            console.log('Nicknames:', data.nicknames);
+        this.socket.onMatchStart = (data) => {
+            console.log('Inizio partita:', data);
             
+            // Verifica che i dati siano nel formato atteso
+            if (!data) {
+                console.error('Dati della partita non validi:', data);
+                return;
+            }
+            
+            // Salva l'ID della partita
             this.matchId = data.matchId;
-            
-            // Nascondi la schermata della lobby
-            document.getElementById('lobby-screen').classList.add('hidden');
-            
-            // Rimuovi il giocatore temporaneo della lobby se esiste
-            if (this.players.has('local-temp')) {
-                this.removePlayer('local-temp');
-            }
             
             // Rimuovi tutti i giocatori esistenti
             this.players.forEach((player, id) => {
                 this.removePlayer(id);
             });
             
-            this.resetGame();
-            
-            // Ottieni la posizione del giocatore locale
-            const localPlayerPosition = data.positions[this.gameSocket.playerId];
-            
-            if (!localPlayerPosition) {
-                console.error('Posizione del giocatore locale non trovata nei dati ricevuti');
-                return;
+            // Aggiungi i giocatori alla partita
+            if (data.players) {
+                console.log('Giocatori nella partita:', data.players);
+                
+                // Gestisci sia il formato array che oggetto
+                if (Array.isArray(data.players)) {
+                    // Formato array
+                    data.players.forEach(playerData => {
+                        if (playerData.id !== this.socket.playerId) {
+                            const position = playerData.position || { x: 0, y: 0, z: 0 };
+                            const nickname = playerData.nickname || playerData.name || 'Sconosciuto';
+                            
+                            // Assicurati che la posizione tenga conto dell'altezza del terreno
+                            if (position.y === 0) {
+                                position.y = this.getTerrainHeight(position.x, position.z) + 1;
+                            }
+                            
+                            this.addPlayer(playerData.id, position, false, nickname);
+                        }
+                    });
+                } else {
+                    // Formato oggetto
+                    Object.entries(data.players).forEach(([id, playerData]) => {
+                        if (id !== this.socket.playerId) {
+                            const position = playerData.position || { x: 0, y: 0, z: 0 };
+                            const nickname = playerData.nickname || playerData.name || 'Sconosciuto';
+                            
+                            // Assicurati che la posizione tenga conto dell'altezza del terreno
+                            if (position.y === 0) {
+                                position.y = this.getTerrainHeight(position.x, position.z) + 1;
+                            }
+                            
+                            this.addPlayer(id, position, false, nickname);
+                        }
+                    });
+                }
             }
             
-            const startPosition = {
-                x: localPlayerPosition.x,
-                y: this.getTerrainHeight(localPlayerPosition.x, localPlayerPosition.z) + 1,
-                z: localPlayerPosition.z
-            };
+            // Aggiungi il giocatore locale
+            const localPlayerData = data.players && (data.players[this.socket.playerId] || data.players.find(p => p.id === this.socket.playerId));
+            const localPlayerPosition = localPlayerData ? localPlayerData.position : { x: 0, y: 0, z: 0 };
             
-            // Ottieni il nickname del giocatore locale
-            const localPlayerNickname = data.nicknames ? 
-                data.nicknames[this.gameSocket.playerId] : 
-                this.gameSocket.playerNickname || 'Tu';
+            // Assicurati che la posizione tenga conto dell'altezza del terreno
+            if (localPlayerPosition.y === 0) {
+                localPlayerPosition.y = this.getTerrainHeight(localPlayerPosition.x, localPlayerPosition.z) + 1;
+            }
             
-            console.log(`Aggiungo giocatore locale ${this.gameSocket.playerId} (${localPlayerNickname}) in posizione:`, startPosition);
-            this.addPlayer(this.gameSocket.playerId, startPosition, true, localPlayerNickname);
+            // Crea il giocatore locale
+            this.addPlayer(this.socket.playerId, localPlayerPosition, true, this.socket.playerNickname);
             
-            // Aggiungi gli altri giocatori
-            data.players.forEach(playerId => {
-                if (playerId !== this.gameSocket.playerId) {
-                    const playerPosition = data.positions[playerId];
-                    
-                    if (!playerPosition) {
-                        console.error(`Posizione del giocatore ${playerId} non trovata nei dati ricevuti`);
-                        return;
-                    }
-                    
-                    const remotePosition = {
-                        x: playerPosition.x,
-                        y: this.getTerrainHeight(playerPosition.x, playerPosition.z) + 1,
-                        z: playerPosition.z
-                    };
-                    
-                    // Ottieni il nickname del giocatore remoto
-                    const playerNickname = data.nicknames ? 
-                        data.nicknames[playerId] : 
-                        `Player-${playerId.substring(0, 5)}`;
-                    
-                    console.log(`Aggiungo giocatore remoto ${playerId} (${playerNickname}) in posizione:`, remotePosition);
-                    this.addPlayer(playerId, remotePosition, false, playerNickname);
-                }
-            });
+            // Aggiungi i tesori alla scena
+            if (data.treasures && Array.isArray(data.treasures)) {
+                data.treasures.forEach(treasure => {
+                    this.createTreasure(treasure.position, treasure.type);
+                });
+            }
             
-            // Aggiungi i tesori
-            data.treasures.forEach(treasure => {
-                const treasurePosition = {
-                    x: treasure.position.x,
-                    y: this.getTerrainHeight(treasure.position.x, treasure.position.z) + 1,
-                    z: treasure.position.z
-                };
-                this.createTreasure(treasurePosition, treasure.type);
-            });
+            // Avvia il timer di gioco
+            this.setupGameTimer(data.duration || 180000); // 3 minuti di default
             
+            // Avvia il gioco
             this.startGame();
         };
         
-        // Gestione dell'evento di aggiornamento del punteggio
-        this.gameSocket.onScoreUpdate = (playerId, score) => {
-            const player = this.players.get(playerId);
-            if (player) {
-                player.score = score;
-                this.updateScoresTable();
+        this.socket.onGameOver = (data) => {
+            console.log('Fine partita:', data);
+            
+            // Verifica che i dati siano nel formato atteso
+            if (!data) {
+                console.error('Dati di fine partita non validi:', data);
+                return;
+            }
+            
+            // Mostra i risultati finali
+            this.endGame(data);
+        };
+        
+        this.socket.onLobbyUpdate = (data) => {
+            console.log('Aggiornamento lobby:', data);
+            
+            // Verifica che i dati siano nel formato atteso
+            if (!data) {
+                console.error('Dati della lobby non validi:', data);
+                return;
+            }
+            
+            // Aggiorna l'interfaccia della lobby
+            const lobbyElement = document.getElementById('lobby-info');
+            if (lobbyElement) {
+                lobbyElement.innerHTML = `
+                    <h2>Lobby</h2>
+                    <p>Giocatori in attesa: ${data.count || data.playersInLobby || 0}</p>
+                    <ul>
+                        ${(data.players || []).map(player => `<li>${player.name || player.nickname || 'Sconosciuto'}</li>`).join('')}
+                    </ul>
+                `;
             }
         };
         
-        // Gestione dell'evento di fine partita
-        this.gameSocket.onGameOver = (data) => {
-            console.log('Partita terminata!', data);
-            
-            // Mostra un messaggio con il vincitore
-            const winnerName = data.winnerId === this.gameSocket.playerId ? 
-                'Tu' : 
-                (this.players.get(data.winnerId)?.playerName || 'Altro giocatore');
-            
-            alert(`Partita terminata! Vincitore: ${winnerName}\nMotivo: ${data.reason}`);
-            
-            // Resetta il gioco
-            this.resetGame();
+        this.socket.onOnlinePlayersUpdate = (count) => {
+            // Aggiorna il contatore dei giocatori online
+            const counterElement = document.getElementById('online-counter');
+            if (counterElement) {
+                counterElement.textContent = count;
+            }
         };
-        
-        // Connetti al server
-        this.gameSocket.connect();
     }
 
     setupGameTimer() {
@@ -1085,7 +1049,7 @@ class Game {
             }
         });
         document.getElementById('winner-text').textContent = 
-            `Vincitore: ${winner === this.gameSocket.playerId ? 'Tu' : 'Giocatore ' + winner} con ${maxScore} tesori!`;
+            `Vincitore: ${winner === this.socket.playerId ? 'Tu' : 'Giocatore ' + winner} con ${maxScore} tesori!`;
     }
 
     addPlayer(id, position, isLocalPlayer = false, nickname = 'Sconosciuto') {
@@ -1238,8 +1202,8 @@ class Game {
                     this.isCollectingTreasure = true;
                     
                     // Invia l'evento al server
-                    this.gameSocket.emitTreasureCollected(
-                        this.gameSocket.playerId, 
+                    this.socket.emitTreasureCollected(
+                        this.socket.playerId, 
                         treasurePosition,
                         treasure.getType()
                     );

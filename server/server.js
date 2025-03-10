@@ -33,21 +33,19 @@ app.get('/api/online-players', (req, res) => {
 
 // Game state
 const gameState = {
-    players: new Map(),
-    treasure: {
-        position: { x: 0, y: 0, z: 0 },
-        collected: 0
-    },
-    matches: new Map(), // Mappa delle partite attive
     lobby: {
-        players: new Map(), // Giocatori in attesa nella lobby
-        maxPlayers: 4, // Numero massimo di giocatori per partita
-        minPlayers: 2 // Numero minimo di giocatori per iniziare una partita
+        players: new Map(), // Giocatori in attesa
+        minPlayersToStart: 2 // Minimo 2 giocatori per iniziare una partita
     },
-    maxMatches: 5, // Numero massimo di partite simultanee
+    matches: new Map(), // Partite attive
+    players: new Map(), // Tutti i giocatori connessi
+    matchDuration: 3 * 60 * 1000, // 3 minuti in millisecondi
     inactivityTimeout: 3 * 60 * 1000, // 3 minuti in millisecondi
-    matchTimeout: 5 * 60 * 1000, // 5 minuti in millisecondi
-    currentMatchId: 0, // Contatore per generare ID partita univoci
+    treasureTypes: {
+        normal: { points: 1, color: 0xFFD700 },
+        blue: { points: 3, color: 0x0000FF },
+        red: { points: 5, color: 0xFF0000 }
+    }
 };
 
 // Generate random position on island (safe from water)
@@ -154,65 +152,52 @@ function getRandomName() {
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
-    console.log('Player connected:', socket.id);
-    
-    // Inizializza il timestamp dell'ultima attività
+    console.log(`Nuovo socket connesso: ${socket.id}`);
     socket.lastActivity = Date.now();
-    
-    // Genera un nome casuale
-    const nickname = getRandomName();
-    
-    // Aggiungi il giocatore al game state
-    gameState.players.set(socket.id, {
-        id: socket.id,
-        position: getRandomPosition(),
-        rotation: { x: 0, y: 0, z: 0 },
-        score: 0,
-        nickname: nickname
-    });
-    
-    // Invia l'evento playerJoined a tutti i client
-    io.emit('playerJoined', {
-        id: socket.id, 
-        position: gameState.players.get(socket.id).position, 
-        nickname: nickname
-    });
-    
-    // Aggiungi il giocatore alla lobby per il matchmaking
-    handleMatchmaking(socket, socket.id);
 
-    socket.on('playerMove', (data) => {
-        // Aggiorna il timestamp dell'ultima attività
+    // Quando un giocatore richiede di entrare in matchmaking
+    socket.on('requestMatchmaking', (data) => {
         socket.lastActivity = Date.now();
+        const playerId = socket.id;
+        const nickname = data.nickname || getRandomName();
         
-        const playerId = data.id || socket.id;
-        const matchId = socket.matchId;
+        console.log(`Richiesta matchmaking da ${nickname} (${playerId})`);
+        console.log(`Stanze del socket:`, Array.from(socket.rooms));
         
-        // Se il giocatore è in una partita, invia l'aggiornamento solo ai giocatori di quella partita
-        if (matchId && gameState.matches.has(matchId)) {
-            const match = gameState.matches.get(matchId);
-            const player = match.players.get(playerId);
+        // Salva il giocatore nel gameState
+        gameState.players.set(playerId, { 
+            name: nickname, 
+            position: getRandomPosition(), 
+            rotation: 0, 
+            score: 0 
+        });
+        
+        // Gestisci il matchmaking
+        handleMatchmaking(socket, playerId);
+    });
+
+    // Gestione del movimento del giocatore
+    socket.on('playerMove', (data) => {
+        socket.lastActivity = Date.now();
+        const playerId = socket.id;
+        
+        if (gameState.players.has(playerId)) {
+            const player = gameState.players.get(playerId);
+            player.position = data.position;
+            player.rotation = data.rotation;
             
-            if (player) {
-                // Aggiorna la posizione del giocatore
-                player.position = data.position;
-                player.rotation = data.rotation;
-                
-                // Invia l'aggiornamento agli altri giocatori nella stessa partita
+            // Trova la partita del giocatore
+            let matchId = null;
+            gameState.matches.forEach((match, id) => {
+                if (match.players.has(playerId)) {
+                    matchId = id;
+                }
+            });
+            
+            if (matchId) {
+                // Invia la posizione aggiornata a tutti gli altri giocatori nella stessa partita
                 socket.to(matchId).emit('playerMoved', {
                     id: playerId,
-                    position: data.position,
-                    rotation: data.rotation
-                });
-            }
-        } else {
-            // Fallback al vecchio sistema
-            const player = gameState.players.get(socket.id);
-            if (player) {
-                Object.assign(player.position, data.position);
-                Object.assign(player.rotation, data.rotation);
-                socket.broadcast.emit('playerMoved', {
-                    id: socket.id,
                     position: player.position,
                     rotation: player.rotation
                 });
@@ -220,6 +205,49 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Gestione della disconnessione
+    socket.on('disconnect', () => {
+        const playerId = socket.id;
+        console.log(`Player disconnected: ${playerId}`);
+        
+        // Rimuovi il giocatore dalla lobby se presente
+        if (gameState.lobby.players.has(playerId)) {
+            gameState.lobby.players.delete(playerId);
+            broadcastLobbyUpdate();
+        }
+        
+        // Rimuovi il giocatore dalle partite attive
+        let matchId = null;
+        gameState.matches.forEach((match, id) => {
+            if (match.players.has(playerId)) {
+                matchId = id;
+                match.players.delete(playerId);
+                
+                // Notifica gli altri giocatori
+                socket.to(id).emit('playerLeft', { id: playerId });
+                
+                // Se non ci sono più giocatori, termina la partita
+                if (match.players.size === 0) {
+                    gameState.matches.delete(id);
+                    console.log(`Partita ${id} terminata: nessun giocatore rimasto`);
+                }
+            }
+        });
+        
+        // Rimuovi il giocatore dal gameState
+        gameState.players.delete(playerId);
+        
+        // Aggiorna il conteggio dei giocatori online
+        broadcastOnlinePlayersCount();
+    });
+    
+    // Ping dal client per mantenere attiva la connessione
+    socket.on('ping', () => {
+        // Aggiorna il timestamp dell'ultima attività
+        socket.lastActivity = Date.now();
+    });
+
+    // Gestione degli eventi del socket
     socket.on('treasureCollected', (data) => {
         try {
             // Aggiorna il timestamp dell'ultima attività
@@ -236,124 +264,6 @@ io.on('connection', (socket) => {
             console.error('Error in treasureCollected event:', error);
         }
     });
-
-    // Handle disconnection
-    socket.on('disconnect', () => {
-        console.log('Player disconnected:', socket.id);
-        
-        // Rimuovi il giocatore dalla lobby se presente
-        if (gameState.lobby.players.has(socket.id)) {
-            gameState.lobby.players.delete(socket.id);
-            broadcastLobbyUpdate();
-        }
-        
-        // Rimuovi il giocatore dalle partite attive
-        gameState.matches.forEach((match, matchId) => {
-            if (match.players.has(socket.id)) {
-                match.players.delete(socket.id);
-                
-                // Informa gli altri giocatori nella partita
-                socket.to(matchId).emit('playerLeft', socket.id);
-                
-                // Se non ci sono più giocatori, rimuovi la partita
-                if (match.players.size === 0) {
-                    gameState.matches.delete(matchId);
-                    console.log(`Partita ${matchId} terminata: nessun giocatore rimasto`);
-                }
-            }
-        });
-        
-        // Fallback al vecchio sistema
-        gameState.players.delete(socket.id);
-        io.emit('playerLeft', socket.id);
-        
-        // Aggiorna il contatore dei giocatori online
-        broadcastOnlinePlayersCount();
-    });
-    
-    // Ping dal client per mantenere attiva la connessione
-    socket.on('ping', () => {
-        // Aggiorna il timestamp dell'ultima attività
-        socket.lastActivity = Date.now();
-    });
-
-    // Gestione degli eventi del socket
-    socket.on('requestMatchmaking', (data) => {
-        const playerId = data.playerId || socket.id;
-        
-        // Usa il nickname fornito dal client, o quello memorizzato nel gameState, o quello nel socket
-        const nickname = data.nickname || 
-                        gameState.players.get(socket.id)?.nickname || 
-                        socket.nickname || 
-                        getRandomName();
-        
-        // Aggiorna il timestamp dell'ultima attività
-        socket.lastActivity = Date.now();
-        
-        // Salva il nickname nel socket per riferimento futuro
-        socket.nickname = nickname;
-        
-        // Verifica se il giocatore esiste nel gameState
-        if (!gameState.players.has(socket.id)) {
-            console.log(`Giocatore ${socket.id} non trovato nel gameState, lo aggiungo ora`);
-            // Aggiungi il giocatore al gameState se non esiste
-            gameState.players.set(socket.id, {
-                id: socket.id,
-                position: getRandomPosition(),
-                rotation: { x: 0, y: 0, z: 0 },
-                score: 0,
-                nickname: nickname
-            });
-            
-            // Invia l'evento playerJoined a tutti i client
-            io.emit('playerJoined', {
-                id: socket.id, 
-                position: gameState.players.get(socket.id).position, 
-                nickname: nickname
-            });
-        } else {
-            // Aggiorna il nickname nel gameState se il giocatore esiste
-            gameState.players.get(socket.id).nickname = nickname;
-        }
-        
-        console.log(`Richiesta matchmaking da ${nickname} (${playerId})`);
-        handleMatchmaking(socket, playerId);
-    });
-    
-    // Aggiungi un gestore specifico per l'evento matchmaking
-    socket.on('matchmaking', (data) => {
-        console.log(`Richiesta matchmaking diretta da ${data.nickname || 'Sconosciuto'} (${socket.id})`);
-        
-        const nickname = data.nickname || socket.nickname || getRandomName();
-        
-        // Verifica se il giocatore esiste nel gameState
-        if (!gameState.players.has(socket.id)) {
-            console.log(`Giocatore ${socket.id} non trovato nel gameState durante matchmaking diretto, lo aggiungo ora`);
-            // Aggiungi il giocatore al gameState se non esiste
-            gameState.players.set(socket.id, {
-                id: socket.id,
-                position: getRandomPosition(),
-                rotation: { x: 0, y: 0, z: 0 },
-                score: 0,
-                nickname: nickname
-            });
-            
-            // Invia l'evento playerJoined a tutti i client
-            io.emit('playerJoined', {
-                id: socket.id, 
-                position: gameState.players.get(socket.id).position, 
-                nickname: nickname
-            });
-        }
-        
-        // Aggiorna il timestamp dell'ultima attività
-        socket.lastActivity = Date.now();
-        
-        // Salva il nickname nel socket per riferimento futuro
-        socket.nickname = nickname;
-        
-        handleMatchmaking(socket, socket.id);
-    });
 });
 
 /**
@@ -362,39 +272,26 @@ io.on('connection', (socket) => {
  * @param {string} playerId - ID del giocatore
  */
 function handleMatchmaking(socket, playerId) {
-    // Ottieni il giocatore dal gameState
-    const player = gameState.players.get(playerId);
-    
-    if (!player) {
+    // Verifica se il giocatore esiste nel gameState
+    if (!gameState.players.has(playerId)) {
         console.error(`Giocatore ${playerId} non trovato nel gameState`);
         return;
     }
     
-    const nickname = player.nickname;
-    
-    console.log(`Gestione matchmaking per ${nickname} (${playerId})`);
+    const player = gameState.players.get(playerId);
     
     // Aggiungi il giocatore alla lobby
-    gameState.lobby.players.set(playerId, {
-        socket: socket,
-        joinTime: Date.now(),
-        nickname: nickname
-    });
-    
-    // Fai entrare il socket nella room della lobby
+    gameState.lobby.players.set(playerId, player);
     socket.join('lobby');
     
-    console.log(`Giocatore ${nickname} (${playerId}) aggiunto alla lobby. Giocatori in lobby: ${gameState.lobby.players.size}`);
+    console.log(`Giocatore ${player.name} (${playerId}) aggiunto alla lobby. Totale: ${gameState.lobby.players.size}`);
     
-    // Invia un aggiornamento della lobby a tutti i giocatori in attesa
+    // Invia aggiornamento della lobby a tutti
     broadcastLobbyUpdate();
     
-    // Se ci sono abbastanza giocatori, avvia una partita
-    if (gameState.lobby.players.size >= gameState.lobby.minPlayers) {
-        console.log(`Avvio partita con ${gameState.lobby.players.size} giocatori`);
+    // Verifica se ci sono abbastanza giocatori per iniziare una partita
+    if (gameState.lobby.players.size >= gameState.lobby.minPlayersToStart) {
         startMatch();
-    } else {
-        console.log(`In attesa di altri giocatori. Attualmente: ${gameState.lobby.players.size}/${gameState.lobby.minPlayers}`);
     }
 }
 
@@ -402,21 +299,15 @@ function handleMatchmaking(socket, playerId) {
  * Invia un aggiornamento dello stato della lobby a tutti i giocatori in attesa
  */
 function broadcastLobbyUpdate() {
-    // Prepara i dati della lobby
     const lobbyData = {
-        playersInLobby: gameState.lobby.players.size,
-        maxPlayers: gameState.lobby.maxPlayers,
-        minPlayers: gameState.lobby.minPlayers,
-        players: Array.from(gameState.lobby.players.entries()).map(([id, data]) => ({
+        count: gameState.lobby.players.size,
+        players: Array.from(gameState.lobby.players.entries()).map(([id, player]) => ({
             id,
-            nickname: data.nickname || `player-${id.slice(0, 5)}`
+            name: player.name
         }))
     };
     
-    // Invia l'aggiornamento a tutti i giocatori nella lobby
     io.to('lobby').emit('lobbyUpdate', lobbyData);
-    
-    console.log(`Lobby update broadcast: ${lobbyData.playersInLobby}/${lobbyData.maxPlayers} giocatori in attesa`);
 }
 
 /**
@@ -493,7 +384,7 @@ function simulateBotMovement(matchId) {
         });
         
         // Log per debug
-        console.log(`Bot ${playerId} (${playerData.nickname}) si è mosso a posizione:`, newPosition);
+        console.log(`Bot ${playerId} (${playerData.name}) si è mosso a posizione:`, newPosition);
         
         // Simula la raccolta di tesori da parte dei bot
         simulateBotTreasureCollection(matchId, playerId, newPosition);
@@ -643,205 +534,130 @@ function handleTreasureCollection(data) {
  * Avvia una nuova partita con i giocatori in attesa
  */
 function startMatch() {
-    // Verifica se abbiamo raggiunto il limite di partite
-    if (gameState.matches.size >= gameState.maxMatches) {
-        console.log(`Limite di partite raggiunto (${gameState.maxMatches}). Rimuovo la partita più vecchia.`);
-        // Trova la partita più vecchia
-        const oldestMatchId = [...gameState.matches.keys()][0];
-        if (oldestMatchId) {
-            // Termina la partita più vecchia
-            endMatch(oldestMatchId, 'Partita terminata per fare spazio a nuove partite');
-        }
+    if (gameState.lobby.players.size < gameState.lobby.minPlayersToStart) {
+        return;
     }
-
-    // Genera un ID univoco per la partita
+    
     const matchId = `match-${Date.now()}`;
+    const players = new Map();
+    const treasures = [];
     
-    // Crea una nuova mappa per i giocatori della partita
-    const matchPlayers = new Map();
+    // Crea un array di posizioni dei giocatori per assicurarsi che siano distanti tra loro
+    const playerPositions = [];
     
-    // Sposta i giocatori dalla lobby alla partita
-    let i = 0;
-    for (const [playerId, playerData] of gameState.lobby.players.entries()) {
-        if (i >= gameState.lobby.maxPlayers) break;
-        
-        // Ottieni il nickname dal gameState o usa un fallback
-        const nickname = gameState.players.get(playerId)?.nickname || 
-                         playerData.nickname || 
-                         `player-${playerId.slice(0, 5)}`;
-        
-        matchPlayers.set(playerId, {
-            socket: io.sockets.sockets.get(playerId), // Recupera il socket direttamente
-            joinTime: playerData.joinTime,
-            nickname: nickname,
-            score: 0, // Inizializza il punteggio
-            position: { x: 0, y: 0, z: 0 }, // Posizione iniziale
-            rotation: { x: 0, y: 0, z: 0 }, // Rotazione iniziale
-            isBot: false, // Per default, i giocatori non sono bot
-            lastDirection: null // Aggiunto per la gestione della direzione
-        });
-        gameState.lobby.players.delete(playerId);
-        i++;
-    }
+    // Seleziona i primi N giocatori dalla lobby
+    let count = 0;
+    const playersData = {};
     
-    // Se ci sono meno giocatori del minimo richiesto, aggiungi bot
-    if (matchPlayers.size < gameState.lobby.minPlayers) {
-        const botsNeeded = gameState.lobby.minPlayers - matchPlayers.size;
-        console.log(`Aggiungendo ${botsNeeded} bot alla partita ${matchId}`);
-        
-        for (let j = 0; j < botsNeeded; j++) {
-            const botId = `bot-${Date.now()}-${j}`;
-            const botNickname = getRandomItalianName();
+    gameState.lobby.players.forEach((player, id) => {
+        if (count < 6) { // Massimo 6 giocatori per partita
+            // Genera una posizione casuale lontana dagli altri giocatori
+            const position = getPositionFarFrom(playerPositions);
+            playerPositions.push(position);
             
-            matchPlayers.set(botId, {
-                joinTime: Date.now(),
-                nickname: botNickname,
-                score: 0,
-                position: { x: 0, y: 0, z: 0 },
-                rotation: { x: 0, y: 0, z: 0 },
-                isBot: true, // Questo è un bot
-                lastDirection: null // Aggiunto per la gestione della direzione
-            });
+            // Aggiorna la posizione del giocatore
+            player.position = position;
+            player.score = 0; // Resetta il punteggio
             
-            console.log(`Bot ${botNickname} (${botId}) aggiunto alla partita`);
+            // Aggiungi il giocatore alla partita
+            players.set(id, player);
+            
+            // Prepara i dati del giocatore per l'evento matchStart
+            playersData[id] = {
+                nickname: player.name,
+                position: position
+            };
+            
+            // Rimuovi il giocatore dalla lobby
+            gameState.lobby.players.delete(id);
+            
+            count++;
         }
-    }
-    
-    // Aggiungi la partita alla mappa delle partite
-    gameState.matches.set(matchId, {
-        players: matchPlayers,
-        startTime: Date.now(),
-        treasures: new Map(),
-        scores: new Map()
     });
     
-    console.log(`Nuova partita creata: ${matchId} con ${matchPlayers.size} giocatori`);
-    console.log('Giocatori nella partita:', Array.from(matchPlayers.keys()));
-    
-    // Genera posizioni casuali per i giocatori
-    const playerPositions = {};
-    for (const playerId of matchPlayers.keys()) {
-        playerPositions[playerId] = getRandomPosition();
-        
-        // Aggiorna la posizione nel giocatore
-        const player = matchPlayers.get(playerId);
-        if (player) {
-            player.position = playerPositions[playerId];
-        }
-    }
-    
-    // Genera posizioni casuali per i tesori
-    const treasurePositions = [];
-    for (let i = 0; i < 5; i++) {
-        try {
-            // Converti le posizioni dei giocatori in un array di oggetti validi
-            const validPlayerPositions = Object.values(playerPositions).filter(pos => 
-                pos && typeof pos === 'object' && 'x' in pos && 'z' in pos
-            );
-            
-            // Se non ci sono posizioni valide, usa una posizione casuale
-            let position;
-            if (validPlayerPositions.length > 0) {
-                position = getPositionFarFrom(validPlayerPositions, 20);
-            } else {
-                position = getRandomPosition();
-            }
-            
-            treasurePositions.push({
-                position,
-                type: getRandomTreasureType()
-            });
-        } catch (error) {
-            console.error(`Errore nella generazione della posizione del tesoro ${i}:`, error);
-            // Fallback a una posizione casuale in caso di errore
-            treasurePositions.push({
-                position: getRandomPosition(),
-                type: getRandomTreasureType()
-            });
-        }
-    }
-    
-    // Prepara i dati dei giocatori con i loro nickname
-    const playersData = [];
-    for (const [playerId, playerData] of matchPlayers.entries()) {
-        playersData.push({
-            id: playerId,
-            nickname: playerData.nickname,
-            position: playerPositions[playerId]
+    // Genera i tesori per la partita
+    for (let i = 0; i < 20; i++) {
+        const position = getPositionFarFrom(playerPositions.concat(treasures.map(t => t.position)));
+        const type = getRandomTreasureType();
+        treasures.push({
+            position,
+            type,
+            collected: false
         });
     }
     
-    // Prepara i nickname in un oggetto per un accesso più facile
-    const nicknames = {};
-    for (const [playerId, playerData] of matchPlayers.entries()) {
-        nicknames[playerId] = playerData.nickname;
-    }
+    // Crea la partita
+    const match = {
+        id: matchId,
+        players,
+        treasures,
+        startTime: Date.now(),
+        endTime: Date.now() + gameState.matchDuration
+    };
     
-    // Invia l'evento di inizio partita a tutti i giocatori
-    for (const [playerId, playerData] of matchPlayers.entries()) {
-        try {
-            // Salta i bot
-            if (playerData.isBot) continue;
-            
-            // Recupera il socket direttamente da io.sockets.sockets
-            const socket = io.sockets.sockets.get(playerId);
-            
-            if (socket && typeof socket.emit === 'function') {
-                // Imposta il matchId nel socket
-                socket.matchId = matchId;
-                
-                // Invia l'evento di inizio partita
-                socket.emit('matchStart', {
-                    matchId,
-                    players: Array.from(matchPlayers.keys()),
-                    positions: playerPositions,
-                    nicknames: nicknames,
-                    treasures: treasurePositions
-                });
-                
-                // Fai entrare il socket nella room della partita
-                socket.join(matchId);
-                
-                console.log(`Evento matchStart inviato al giocatore ${playerData.nickname} (${playerId})`);
-                console.log(`Dati inviati: ${matchPlayers.size} giocatori, ${treasurePositions.length} tesori`);
-            } else {
-                console.error(`Socket non trovato per il giocatore ${playerId}`);
-                // Rimuovi il giocatore dalla partita se il socket non è valido
-                matchPlayers.delete(playerId);
-                if (matchPlayers.size === 0) {
-                    gameState.matches.delete(matchId);
-                    console.log(`Partita ${matchId} annullata: nessun giocatore valido`);
-                }
-            }
-        } catch (error) {
-            console.error(`Errore nell'invio dell'evento matchStart al giocatore ${playerId}:`, error);
-            // Rimuovi il giocatore dalla partita in caso di errore
-            matchPlayers.delete(playerId);
-            if (matchPlayers.size === 0) {
-                gameState.matches.delete(matchId);
-                console.log(`Partita ${matchId} annullata: nessun giocatore valido`);
-            }
+    gameState.matches.set(matchId, match);
+    
+    console.log(`Partita ${matchId} iniziata con ${players.size} giocatori e ${treasures.length} tesori`);
+    
+    // Fai entrare tutti i giocatori nella stanza della partita
+    players.forEach((player, id) => {
+        const socket = io.sockets.sockets.get(id);
+        if (socket) {
+            socket.leave('lobby');
+            socket.join(matchId);
         }
-    }
+    });
     
-    // Imposta un timer per terminare la partita dopo 5 minuti
-    setTimeout(() => {
-        if (gameState.matches.has(matchId)) {
-            endMatch(matchId, 'Tempo scaduto');
+    // Invia l'evento matchStart a tutti i giocatori nella partita
+    io.to(matchId).emit('matchStart', {
+        matchId,
+        players: playersData,
+        treasures: treasures.map(t => ({ position: t.position, type: t.type })),
+        duration: gameState.matchDuration
+    });
+    
+    // Aggiorna la lobby
+    broadcastLobbyUpdate();
+    
+    // Avvia il movimento simulato dei bot se ci sono meno di 2 giocatori reali
+    if (players.size < 2) {
+        // Aggiungi bot fino ad avere almeno 2 giocatori totali
+        const botsToAdd = 2 - players.size;
+        for (let i = 0; i < botsToAdd; i++) {
+            const botId = `bot-${Date.now()}-${i}`;
+            const botPosition = getPositionFarFrom(playerPositions);
+            playerPositions.push(botPosition);
+            
+            const botName = getRandomName();
+            const bot = {
+                name: `Bot ${botName}`,
+                position: botPosition,
+                rotation: 0,
+                score: 0,
+                isBot: true
+            };
+            
+            players.set(botId, bot);
+            gameState.players.set(botId, bot);
+            
+            // Notifica i giocatori dell'aggiunta del bot
+            io.to(matchId).emit('playerJoined', {
+                id: botId,
+                name: bot.name,
+                position: bot.position,
+                rotation: bot.rotation,
+                isBot: true
+            });
         }
-    }, gameState.matchTimeout);
-    
-    // Verifica se ci sono bot nella partita
-    const hasBots = Array.from(matchPlayers.values()).some(player => player.isBot);
-    
-    // Avvia la simulazione del movimento dei bot solo se ci sono bot nella partita
-    if (hasBots) {
-        console.log(`Avvio simulazione movimento bot per la partita ${matchId}`);
+        
+        // Avvia il movimento simulato dei bot
         simulateBotMovement(matchId);
     }
     
-    // Aggiorna il contatore dei giocatori online
-    broadcastOnlinePlayersCount();
+    // Imposta un timer per terminare la partita
+    setTimeout(() => {
+        endMatch(matchId, 'timeout');
+    }, gameState.matchDuration);
 }
 
 /**
@@ -939,28 +755,6 @@ function getRandomTreasureType() {
     }
     
     return 'normal'; // Fallback
-}
-
-/**
- * Genera un nome italiano casuale per un bot
- * @returns {string} Nome casuale
- */
-function getRandomItalianName() {
-    const firstNames = [
-        "Marco", "Sofia", "Luca", "Giulia", "Alessandro", "Martina", "Davide", "Chiara",
-        "Francesco", "Anna", "Matteo", "Sara", "Lorenzo", "Elena", "Simone", "Valentina",
-        "Andrea", "Laura", "Giovanni", "Francesca", "Riccardo", "Elisa", "Tommaso", "Giorgia"
-    ];
-    
-    const suffixes = [
-        "Bot", "AI", "Robot", "Virtual", "Auto", "Sim", "Digital", "Cyber",
-        "Tech", "Mech", "Droid", "Machine", "System", "Program", "Assistant", "Helper"
-    ];
-    
-    const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
-    const suffix = suffixes[Math.floor(Math.random() * suffixes.length)];
-    
-    return `${firstName}${suffix}`;
 }
 
 // Start server
@@ -1062,7 +856,7 @@ function checkMatches() {
     // Controlla ogni partita
     for (const [matchId, match] of gameState.matches.entries()) {
         // Se la partita è attiva da più del tempo massimo, terminala
-        if (now - match.startTime > gameState.matchTimeout) {
+        if (now - match.startTime > gameState.matchDuration) {
             console.log(`Match ${matchId} has exceeded time limit. Ending match.`);
             endMatch(matchId, 'Tempo scaduto');
         }
